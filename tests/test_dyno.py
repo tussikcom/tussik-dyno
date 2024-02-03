@@ -1,7 +1,7 @@
 """Test for connecting"""
+from enum import Enum
 
-from tussik.dyno import DynoTypeMap, DynoTypeString, DynoTypeTable, DynoKey, DynoGlobalIndex, DynoSchema, DynoKeyFormat, \
-    DynoTypeUuid, DynoTypeBool, DynoTypeDateTime, DynoTypeInt, DynoTypeFlag, DynoConnect
+from tussik.dyno import *
 
 
 class SampleAddress(DynoTypeMap):
@@ -11,6 +11,20 @@ class SampleAddress(DynoTypeMap):
     state = DynoTypeString(min_length=2, max_length=2)
     country = DynoTypeString(min_length=2, max_length=2)
     zip = DynoTypeString()
+
+
+class SamplePetEnum(Enum):
+    Cat = "cat"
+    Dog = "dog"
+    Snake = "snake"
+    Goat = "goat"
+
+
+class SampleStatusEnum(Enum):
+    One = 1
+    Two = 2
+    Three = 3
+    Four = 4
 
 
 class SampleTable(DynoTypeTable):
@@ -46,13 +60,15 @@ class SampleTable(DynoTypeTable):
         flag = DynoTypeFlag({"Left", "Right", "Center", "Top", "Bottom"})
         created = DynoTypeDateTime(readonly=True)
         modified = DynoTypeDateTime(current=True)
+        pet = DynoTypeStrEnum(SamplePetEnum, SamplePetEnum.Cat)
+        status = DynoTypeIntEnum(SampleStatusEnum, SampleStatusEnum.Two)
 
 
 DynoConnect.set_host()
 
 
 class TestDyno:
-    def test_connect(self) -> None:
+    def test_account(self) -> None:
         db = DynoConnect()
         data_account = {
             "address": {
@@ -63,6 +79,26 @@ class TestDyno:
             "joe": "skip",
             "modified": 1,
         }
+
+        value1 = SampleTable.write_key(data_account)
+
         dr = db.insert(data_account, SampleTable, "Account")
         accountid = dr.data.get('accountid')
         dr = db.get_item(dr.data, SampleTable, "Account")
+
+    def test_user(self) -> None:
+        db = DynoConnect()
+        data_user = {
+            "accountid": "AAABBBCCC",
+            "userid": None,
+            "email": "user@domain.com",
+            "flag": "Left",
+            "joe": "skip",
+            "modified": 1,
+        }
+
+        value1 = SampleTable.write_key(data_user, "User", True)
+
+        dr = db.insert(data_user, SampleTable, "User")
+        userid = dr.data.get('userid')
+        dr = db.get_item(dr.data, SampleTable, "User")

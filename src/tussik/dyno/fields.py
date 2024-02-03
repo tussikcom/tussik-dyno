@@ -2,12 +2,12 @@ import datetime
 import logging
 import uuid
 from enum import Enum
-from typing import Set, Any, Dict
+from typing import Set, Any, Dict, Type
 
 logger = logging.getLogger()
 
 
-class DynoTypeEnum(str, Enum):
+class DynoEnum(str, Enum):
     String = "S"
     Number = "N"
     Bytes = "B"
@@ -35,23 +35,23 @@ class DynoTypeBase:
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
             return {self.code: True}
-        if isinstance(value, bool) and self.code == DynoTypeEnum.Boolean:
+        if isinstance(value, bool) and self.code == DynoEnum.Boolean:
             return {self.code: value}
-        if isinstance(value, int) and self.code == DynoTypeEnum.Number:
+        if isinstance(value, int) and self.code == DynoEnum.Number:
             return {self.code: value}
-        if isinstance(value, float) and self.code == DynoTypeEnum.Number:
+        if isinstance(value, float) and self.code == DynoEnum.Number:
             return {self.code: value}
-        if isinstance(value, bytes) and self.code == DynoTypeEnum.Bytes:
+        if isinstance(value, bytes) and self.code == DynoEnum.Bytes:
             return {self.code: value}
-        if isinstance(value, str) and self.code == DynoTypeEnum.String:
+        if isinstance(value, str) and self.code == DynoEnum.String:
             return {self.code: value}
-        if isinstance(value, list) and self.code == DynoTypeEnum.StringList:
+        if isinstance(value, list) and self.code == DynoEnum.StringList:
             result = list[str]()
             for item in value:
                 if isinstance(item, str):
                     result.append(item)
             return {self.code: value}
-        if isinstance(value, list) and self.code == DynoTypeEnum.NumberList:
+        if isinstance(value, list) and self.code == DynoEnum.NumberList:
             result = list[int | float]()
             for item in value:
                 if isinstance(item, (int, float)) and item:
@@ -61,28 +61,28 @@ class DynoTypeBase:
         raise ValueError(f"{myname}.read: Unsupported value-type {type(value)}")
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return None
 
         if datatype != self.code:
             myname = self.__class__.__name__
             raise ValueError(f"{myname}.write: expecting type {self.code}")
 
-        if isinstance(value, str) and self.code == DynoTypeEnum.String:
+        if isinstance(value, str) and self.code == DynoEnum.String:
             return value
-        if isinstance(value, (float, str)) and self.code == DynoTypeEnum.Number:
+        if isinstance(value, (float, str)) and self.code == DynoEnum.Number:
             return float(value)
-        if isinstance(value, (int, str)) and self.code == DynoTypeEnum.Number:
+        if isinstance(value, (int, str)) and self.code == DynoEnum.Number:
             return int(value)
-        if isinstance(value, bytes) and self.code == DynoTypeEnum.Bytes:
+        if isinstance(value, bytes) and self.code == DynoEnum.Bytes:
             return value
-        if isinstance(value, list) and self.code == DynoTypeEnum.StringList:
+        if isinstance(value, list) and self.code == DynoEnum.StringList:
             results = list[str]()
             for item in value:
                 if isinstance(item, str):
                     results.append(item)
             return results
-        if isinstance(value, list) and self.code == DynoTypeEnum.NumberList:
+        if isinstance(value, list) and self.code == DynoEnum.NumberList:
             results = list[int | float]()
             for item in value:
                 if isinstance(item, str):
@@ -126,7 +126,7 @@ class DynoTypeDateTime(DynoTypeBase):
         return {self.code: str(int(datetime.datetime.utcnow().timestamp()))}
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return None
         if datatype != self.code:
             raise ValueError(f"DynoTypeDateTime.read: Unexpected datatype {datatype}")
@@ -134,6 +134,78 @@ class DynoTypeDateTime(DynoTypeBase):
             return int(value)
         dt = datetime.datetime.utcfromtimestamp(int(value))
         return dt
+
+
+class DynoTypeIntEnum(DynoTypeBase):
+    __slots__ = ["enumclass", "defval"]
+    code: str = "N"
+
+    def __init__(self, enumclass: Type[Enum], defval: Enum,
+                 always: None | bool = None, readonly: None | bool = None):
+        super().__init__(always, readonly)
+        self.enumclass = enumclass
+        self.defval = defval if isinstance(defval, enumclass) else None
+
+    def read(self, datatype: str, value: Any) -> Any:
+        if datatype == DynoEnum.Null:
+            return None
+
+        for item in self.enumclass:
+            if isinstance(item.value, int) and datatype == DynoEnum.Number:
+                if item.value == int(value):
+                    return item
+        return None
+
+    def write(self, value: Any) -> Dict[str, Any]:
+        if value is None:
+            if self.defval is not None:
+                return {self.code: str(self.defval.value)}
+            return {DynoEnum.Null.value: True}
+
+        if not isinstance(value, self.enumclass):
+            raise ValueError(f"DynoTypeIntEnum.write: Invalid value type {type(value)}")
+
+        for item in self.enumclass:
+            if isinstance(item.value, int) and item.value == value:
+                return {self.code: int(item.value)}
+
+        raise ValueError(f"DynoTypeIntEnum.write: Value {value} is not a valid value")
+
+
+class DynoTypeStrEnum(DynoTypeBase):
+    __slots__ = ["enumclass", "defval"]
+    code: str = "S"
+
+    def __init__(self, enumclass: Type[Enum], defval: Enum,
+                 always: None | bool = None, readonly: None | bool = None):
+        super().__init__(always, readonly)
+        self.enumclass = enumclass
+        self.defval = defval if isinstance(defval, enumclass) else None
+
+    def read(self, datatype: str, value: Any) -> Any:
+        if datatype == DynoEnum.Null:
+            return None
+
+        for item in self.enumclass:
+            if isinstance(item.value, str) and datatype == DynoEnum.String:
+                if item.value == str(value):
+                    return item
+        return None
+
+    def write(self, value: Any) -> Dict[str, Any]:
+        if value is None:
+            if self.defval is not None:
+                return {self.code: str(self.defval.value)}
+            return {DynoEnum.Null.value: True}
+
+        if not isinstance(value, self.enumclass):
+            raise ValueError(f"DynoTypeStrEnum.write: Invalid value type {type(value)}")
+
+        for item in self.enumclass:
+            if isinstance(item.value, str) and item.value == value:
+                return {self.code: str(item.value)}
+
+        raise ValueError(f"DynoTypeStrEnum.write: Value {value} is not a valid value")
 
 
 class DynoTypeFlag(DynoTypeBase):
@@ -145,9 +217,9 @@ class DynoTypeFlag(DynoTypeBase):
         self.options = options
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return None
-        if datatype != DynoTypeEnum.String:
+        if datatype != DynoEnum.String:
             raise ValueError(f"DynoTypeFlag.read: Unexpected dyno type {datatype}")
         if not isinstance(value, str):
             raise ValueError(f"DynoTypeFlag.read: Unexpected value type {type(value)}")
@@ -156,7 +228,7 @@ class DynoTypeFlag(DynoTypeBase):
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
         if not isinstance(value, str):
             raise ValueError(f"DynoTypeFlag.write: Invalid value type {type(value)}")
         if value not in self.options:
@@ -183,7 +255,7 @@ class DynoTypeString(DynoTypeBase):
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
 
         if not isinstance(value, str):
             raise ValueError(f"DynoTypeString.write: Unsupported type {type(value)} for string entry")
@@ -201,7 +273,7 @@ class DynoTypeStringList(DynoTypeBase):
     code: str = "SS"
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return list[str]()
 
         if datatype != self.code:
@@ -215,7 +287,7 @@ class DynoTypeStringList(DynoTypeBase):
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
             raise ValueError(f"DynoTypeStringList.write: Unexpected value type {type(value)}")
         results = list[str]()
@@ -228,7 +300,7 @@ class DynoTypeIntList(DynoTypeBase):
     code: str = "NS"
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return list[int]()
 
         if datatype != self.code:
@@ -242,7 +314,7 @@ class DynoTypeIntList(DynoTypeBase):
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
             raise ValueError(f"DynoTypeIntList.write: Unexpected value type {type(value)}")
         results = list[int]()
@@ -255,7 +327,7 @@ class DynoTypeFloatList(DynoTypeBase):
     code: str = "NS"
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return list[float]()
 
         if datatype != self.code:
@@ -269,7 +341,7 @@ class DynoTypeFloatList(DynoTypeBase):
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
             raise ValueError(f"DynoTypeFloatList.write: Unexpected value type {type(value)}")
         results = list[float]()
@@ -282,7 +354,7 @@ class DynoTypeByteList(DynoTypeBase):
     code: str = "BS"
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return list[float]()
 
         if datatype != self.code:
@@ -297,7 +369,7 @@ class DynoTypeByteList(DynoTypeBase):
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
             raise ValueError(f"DynoTypeByteList.write: Unexpected value type {type(value)}")
         results = list[bytes]()
@@ -323,9 +395,9 @@ class DynoTypeInt(DynoTypeBase):
         self.le = le
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return None
-        if datatype != DynoTypeEnum.Number:
+        if datatype != DynoEnum.Number:
             return None  # just accept it silently
         return int(value)
 
@@ -333,7 +405,7 @@ class DynoTypeInt(DynoTypeBase):
         if value is None:
             if self.defval is not None:
                 return {self.code: self.defval}
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
 
         if not isinstance(value, (int, float)):
             raise ValueError(f"DynoTypeInt.write: Unexpected value type {type(value)}")
@@ -367,15 +439,15 @@ class DynoTypeFloat(DynoTypeBase):
         self.le = le
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return None
-        if datatype != DynoTypeEnum.Number:
+        if datatype != DynoEnum.Number:
             return None  # just accept it silently
         return float(value)
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
 
         if not isinstance(value, (int, float)):
             raise ValueError(f"DynoTypeFloat.write: Unexpected value type {type(value)}")
@@ -426,7 +498,7 @@ class DynoTypeMap(DynoTypeBase):
         return results
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return list()
         if datatype != self.code:
             raise ValueError(f"DynoTypeMap.read: Unexpected dyno-type {datatype}")
@@ -461,7 +533,7 @@ class DynoTypeMap(DynoTypeBase):
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
         if not isinstance(value, dict):
             raise ValueError(f"DynoTypeMap.write: Unexpected value-type {type(value)}")
 
@@ -478,7 +550,7 @@ class DynoTypeMap(DynoTypeBase):
 
     def old_write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
         if not isinstance(value, dict):
             raise ValueError(f"DynoTypeMap.write: Unexpected value-type {type(value)}")
 
@@ -511,7 +583,7 @@ class DynoTypeList(DynoTypeBase):
         return results
 
     def read(self, datatype: str, value: Any) -> Any:
-        if datatype == DynoTypeEnum.Null:
+        if datatype == DynoEnum.Null:
             return list()
         if datatype != self.code:
             raise ValueError(f"DynoTypeList.read: Unexpected dyno-type {datatype}")
@@ -544,7 +616,7 @@ class DynoTypeList(DynoTypeBase):
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
-            return {DynoTypeEnum.Null.value: True}
+            return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
             raise ValueError(f"DynoTypeList.write: Unexpected value-type {type(value)}")
 

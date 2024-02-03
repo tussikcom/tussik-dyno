@@ -2,7 +2,7 @@ import copy
 import logging
 from typing import Set, Any, Dict, Type
 
-from .fields import DynoTypeEnum
+from .fields import DynoEnum
 from .table import DynoTypeTable
 
 logger = logging.getLogger()
@@ -53,17 +53,17 @@ class DynoUpdate:
         if isinstance(value, dict):
             self._attrib_values[key] = value
         elif isinstance(value, bool):
-            self._attrib_values[key] = {DynoTypeEnum.Boolean.value: value}
+            self._attrib_values[key] = {DynoEnum.Boolean.value: value}
         elif isinstance(value, int):
-            self._attrib_values[key] = {DynoTypeEnum.Number.value: str(value)}
+            self._attrib_values[key] = {DynoEnum.Number.value: str(value)}
         elif isinstance(value, float):
-            self._attrib_values[key] = {DynoTypeEnum.Number.value: str(value)}
+            self._attrib_values[key] = {DynoEnum.Number.value: str(value)}
         elif isinstance(value, str):
-            self._attrib_values[key] = {DynoTypeEnum.String.value: str(value)}
+            self._attrib_values[key] = {DynoEnum.String.value: str(value)}
         elif isinstance(value, bytes):
-            self._attrib_values[key] = {DynoTypeEnum.Bytes.value: str(value)}
+            self._attrib_values[key] = {DynoEnum.Bytes.value: str(value)}
         else:
-            self._attrib_values[key] = {DynoTypeEnum.Null.value: True}
+            self._attrib_values[key] = {DynoEnum.Null.value: True}
 
         return key
 

@@ -3,6 +3,8 @@ from typing import Any, Type, Self
 
 import boto3
 
+from .table import DynoTypeTable
+
 logger = logging.getLogger()
 
 

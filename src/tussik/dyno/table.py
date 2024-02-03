@@ -2,7 +2,7 @@ import inspect
 import logging
 from typing import Set, Any, Dict, Type, Optional
 
-from .fields import DynoTypeEnum, DynoTypeBase
+from .fields import DynoEnum, DynoTypeBase
 
 logger = logging.getLogger()
 
@@ -11,12 +11,12 @@ class DynoKey:
 
     def __init__(self,
                  pk: None | str = None, sk: None | str = None,
-                 pk_type: None | DynoTypeEnum = None, sk_type: None | DynoTypeEnum = None
+                 pk_type: None | DynoEnum = None, sk_type: None | DynoEnum = None
                  ):
         self.pk = pk or "pk"
         self.sk = sk or "sk"
-        self.pk_type = pk_type or DynoTypeEnum.String
-        self.sk_type = sk_type or DynoTypeEnum.String
+        self.pk_type = pk_type or DynoEnum.String
+        self.sk_type = sk_type or DynoEnum.String
 
 
 class DynoKeyFormat:
@@ -47,13 +47,13 @@ class DynoKeyFormat:
 class DynoGlobalIndex:
     def __init__(self,
                  pk: None | str = None, sk: None | str = None,
-                 pk_type: None | DynoTypeEnum = None, sk_type: None | DynoTypeEnum = None,
+                 pk_type: None | DynoEnum = None, sk_type: None | DynoEnum = None,
                  read_unit: None | int = None, write_unit: None | int = None
                  ):
         self.pk = pk or "pk"
         self.sk = sk or "sk"
-        self.pk_type = pk_type or DynoTypeEnum.String
-        self.sk_type = sk_type or DynoTypeEnum.String
+        self.pk_type = pk_type or DynoEnum.String
+        self.sk_type = sk_type or DynoEnum.String
         self.read_unit = read_unit or 1
         self.write_unit = write_unit or 1
 
@@ -184,9 +184,9 @@ class DynoTypeTable:
                 dt = next(iter(v1))
                 val = v1[dt]
 
-                if dt == DynoTypeEnum.Null:
+                if dt == DynoEnum.Null:
                     continue
-                elif dt == DynoTypeEnum.Map:
+                elif dt == DynoEnum.Map:
                     if not nested:
                         continue
                     result[k1] = dict[str, [dict[str, Any]]]()
@@ -194,7 +194,7 @@ class DynoTypeTable:
                         rec = cls.dyno2data(v2)
                         result[k1][k2] = rec
 
-                elif dt == DynoTypeEnum.List:
+                elif dt == DynoEnum.List:
                     if not nested:
                         continue
                     result[k1] = list[dict[str, Any]]()
@@ -202,7 +202,7 @@ class DynoTypeTable:
                         rec = cls.dyno2data(item)
                         result[k1].append(rec)
 
-                elif dt == DynoTypeEnum.Number:
+                elif dt == DynoEnum.Number:
                     v = float(val)
                     if v.is_integer():
                         v = int(v)
