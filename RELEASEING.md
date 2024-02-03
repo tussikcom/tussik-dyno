@@ -1,8 +1,8 @@
 # Release Checklist
 
 - [ ] Get `main` to the appropriate code release state.
-      [GitHub Actions](https://github.com/tussikcom/tussikzpl/actions) should be running
-      
+  [GitHub Actions](https://github.com/tussikcom/tussikzpl/actions) should be running
+
 * [ ] Start from a freshly cloned repo:
 
 ```bash
@@ -46,6 +46,7 @@ python3 -c "import tussik.dyno; print(tussik.dyno.__version__)"
 ```
 
 * [ ] Push tag:
+
  ```bash
 git push --tags
 ```
