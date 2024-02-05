@@ -160,6 +160,8 @@ class DynoAttrIntEnum(DynoAttrBase):
 
     def read(self, datatype: str, value: Any) -> Any:
         if datatype == DynoEnum.Null:
+            if self.defval is not None:
+                return {self.code: str(self.defval.value)}
             return None
 
         for item in self.enumclass:
@@ -416,7 +418,7 @@ class DynoAttrInt(DynoAttrBase):
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
             if self.defval is not None:
-                return {self.code: self.defval}
+                return {self.code: str(self.defval)}
             return {DynoEnum.Null.value: True}
 
         if not isinstance(value, (int, float)):
@@ -459,6 +461,8 @@ class DynoAttrFloat(DynoAttrBase):
 
     def write(self, value: Any) -> Dict[str, Any]:
         if value is None:
+            if self.defval is not None:
+                return {self.code: str(self.defval)}
             return {DynoEnum.Null.value: True}
 
         if not isinstance(value, (int, float)):
@@ -489,7 +493,7 @@ class DynoAttrBool(DynoAttrBase):
 
 class DynoAttrBytes(DynoAttrBase):
     __slots__ = ["defval"]
-    code: str = "B"
+    code: str = DynoEnum.Bytes.value
 
     def __init__(self, defval: None | bytes = None,
                  always: None | bool = None, readonly: None | bool = None):
@@ -498,7 +502,7 @@ class DynoAttrBytes(DynoAttrBase):
 
 
 class DynoAttrMap(DynoAttrBase):
-    code: str = "M"
+    code: str = DynoEnum.Map.value
 
     def get_attributes(self) -> Dict[str, DynoAttrBase]:
         results = dict[str, DynoAttrBase]()
@@ -583,7 +587,7 @@ class DynoAttrMap(DynoAttrBase):
 
 
 class DynoAttrList(DynoAttrBase):
-    code: str = "L"
+    code: str = DynoEnum.List.value
 
     def get_attributes(self) -> Dict[str, DynoAttrBase]:
         results = dict[str, DynoAttrBase]()
