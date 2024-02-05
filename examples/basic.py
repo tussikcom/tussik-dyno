@@ -1,21 +1,21 @@
 import logging
 
-from tussik.dyno import DynoTypeMap, DynoTypeString, DynoTypeTable, DynoKey, DynoGlobalIndex, DynoSchema, DynoKeyFormat, \
-    DynoTypeUuid, DynoTypeBool, DynoTypeDateTime, DynoTypeInt, DynoTypeFlag, DynoConnect
+from tussik.dyno import DynoAttrMap, DynoAttrString, DynoTable, DynoKey, DynoGlobalIndex, DynoSchema, DynoKeyFormat, \
+    DynoAttrUuid, DynoAttrBool, DynoAttrDateTime, DynoAttrInt, DynoAttrFlag, DynoConnect
 
 logger = logging.getLogger()
 
 
-class SampleAddress(DynoTypeMap):
-    addr1 = DynoTypeString()
-    addr2 = DynoTypeString()
-    city = DynoTypeString()
-    state = DynoTypeString(min_length=2, max_length=2)
-    country = DynoTypeString(min_length=2, max_length=2)
-    zip = DynoTypeString()
+class SampleAddress(DynoAttrMap):
+    addr1 = DynoAttrString()
+    addr2 = DynoAttrString()
+    city = DynoAttrString()
+    state = DynoAttrString(min_length=2, max_length=2)
+    country = DynoAttrString(min_length=2, max_length=2)
+    zip = DynoAttrString()
 
 
-class SampleTable(DynoTypeTable):
+class SampleTable(DynoTable):
     TableName: str = "sample"
     Key = DynoKey("pk", "sk")
     GlobalIndexes = {
@@ -28,26 +28,26 @@ class SampleTable(DynoTypeTable):
         GlobalIndexes = {
             "gsi1": DynoKeyFormat(pk="account#", sk="alias#{alias}", req={"alias"}),
         }
-        accountid = DynoTypeUuid()
-        active = DynoTypeBool(defval=True)
-        alias = DynoTypeString()
+        accountid = DynoAttrUuid()
+        active = DynoAttrBool(defval=True)
+        alias = DynoAttrString()
         address = SampleAddress()
-        created = DynoTypeDateTime(readonly=True)
-        modified = DynoTypeDateTime(current=True)
+        created = DynoAttrDateTime(readonly=True)
+        modified = DynoAttrDateTime(current=True)
 
     class User(DynoSchema):
         Key = DynoKeyFormat(pk="account#user#", sk="accountid#{accountid}#user#{userid}")
         GlobalIndexes = {
             "gsi1": DynoKeyFormat(pk="user#", sk="email#{email}", req={"email"}),
         }
-        accountid = DynoTypeUuid()
-        userid = DynoTypeUuid()
-        email = DynoTypeString()
-        age = DynoTypeInt(defval=20)
-        active = DynoTypeBool(defval=True)
-        flag = DynoTypeFlag({"Left", "Right", "Center", "Top", "Bottom"})
-        created = DynoTypeDateTime(readonly=True)
-        modified = DynoTypeDateTime(current=True)
+        accountid = DynoAttrUuid()
+        userid = DynoAttrUuid()
+        email = DynoAttrString()
+        age = DynoAttrInt(defval=20)
+        active = DynoAttrBool(defval=True)
+        flag = DynoAttrFlag({"Left", "Right", "Center", "Top", "Bottom"})
+        created = DynoAttrDateTime(readonly=True)
+        modified = DynoAttrDateTime(current=True)
 
 
 #

@@ -8,14 +8,16 @@ from .table import DynoTable, DynoTableLink
 logger = logging.getLogger()
 
 
-class DynoUpdate:
+class DynoQuery:
     __slots__ = [
         "_schema_obj", "_key_obj", "_key_fmt", "_key",
         '_expression_set', '_expression_add', '_expression_remove', '_expression_delete',
-        '_attrib_names', '_attrib_values', '_counter', '_condition_exp', "_link"
+        '_attrib_names', '_attrib_values', '_counter', '_condition_exp',
+        '_page', '_page_size', '_data', '_link'
     ]
 
-    def __init__(self, table: Type[DynoTable], schema: str, globalindex: None | str = None):
+    def __init__(self, data: Dict[str, Any], table: Type[DynoTable], schema: str, globalindex: None | str = None):
+        self._data = data
         self._link = table.get_link(schema, globalindex)
         self._counter = 0
         self._condition_exp = list[str]()
@@ -26,26 +28,40 @@ class DynoUpdate:
         self._attrib_names = dict[str, str]()
         self._attrib_values = dict[str, dict[str, str | bool]]()
         self._key: None | dict = None
+        self._page: None | int = None
+        self._page_size: None | int = None
 
         self._schema_obj = table.get_schema(schema)
-        if isinstance(self._link.globalindex, str):
-            self._key_obj = self._link.table.GlobalIndexes.get(self._link.globalindex)
+        if isinstance(self._globalindex, str):
+            self._key_obj = self._table.GlobalIndexes.get(self._globalindex)
             self._key_fmt = self._schema_obj.Key
         elif self._schema_obj is not None:
-            self._key_obj = self._link.table.Key
-            self._key_fmt = self._schema_obj.GlobalIndexes.get(self._link.globalindex)
+            self._key_obj = self._table.Key
+            self._key_fmt = self._schema_obj.GlobalIndexes.get(self._globalindex)
 
     @property
     def TableName(self) -> str:
-        return self._link.table.TableName
+        return self._table.TableName
 
     def get_link(self) -> DynoTableLink:
         return self._link
 
+    def set_pagination(self, page: int = 1, page_size: int = 100):
+        self._page = max(1, page)
+        self._page_size = max(1, page_size)
+
+    def set_limit(self, max_results: None | int = None):
+        if max_results is None or max_results <= 0:
+            self._page = None
+            self._page_size = None
+        else:
+            self._page = 1
+            self._page_size = max(1, max_results)
+
     def write(self) -> None | Dict[str, Any]:
         result = dict()
 
-        result['TableName'] = self._link.table.TableName
+        result['TableName'] = self._table.TableName
 
         return result
 
@@ -166,7 +182,7 @@ class DynoUpdate:
         if isinstance(dataset[key], dict):
             data = dataset
         else:
-            data = self._link.table.read(dataset, self._link.schema, self._link.globalindex)
+            data = self._table.read(dataset)
         self._extract("ADD", data)
 
     def apply_set(self, dataset: Set[str] | Dict[str, Any]) -> None:
@@ -179,7 +195,7 @@ class DynoUpdate:
             if isinstance(dataset[key], dict):
                 data = dataset
             else:
-                data = self._link.table.read(dataset, self._link.schema, self._link.globalindex)
+                data = self._table.read(dataset)
         self._extract("SET", data)
 
     def apply_remove(self, dataset: Set[str] | Dict[str, Any]) -> None:
@@ -192,7 +208,7 @@ class DynoUpdate:
             if isinstance(dataset[key], dict):
                 data = dataset
             else:
-                data = self._link.table.read(dataset, self._link.schema, self._link.globalindex)
+                data = self._table.read(dataset)
         self._extract("REMOVE", data)
 
     def apply_delete(self, dataset: Set[str] | Dict[str, Any]) -> None:
@@ -205,7 +221,7 @@ class DynoUpdate:
             if isinstance(dataset[key], dict):
                 data = dataset
             else:
-                data = self._link.table.read(dataset, self._link.schema, self._link.globalindex)
+                data = self._table.read(dataset)
         self._extract("DELETE", data)
 
     def _extract(self, action: str, dataset: Dict[str, dict], prefix: None | str = None) -> None:

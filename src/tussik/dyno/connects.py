@@ -1,9 +1,11 @@
 import logging
-from typing import Any, Type, Self
+from typing import Any, Type, Dict
 
 import boto3
 
-from .table import DynoTypeTable
+from .query import DynoQuery
+from .table import DynoTable, DynoTableLink
+from .update import DynoUpdate
 
 logger = logging.getLogger()
 
@@ -21,13 +23,12 @@ class DynoResponse:
         self.data: Any = None
         self.attributes = dict()
 
-    def set_error(self, code: int, message: str) -> Self:
+    def set_error(self, code: int, message: str) -> None:
         self.ok = False
         self.code = code
         self.errors.append(message)
-        return self
 
-    def set_response(self, r: dict, table: None | Type[DynoTypeTable] = None) -> Self:
+    def set_response(self, r: dict, link: None | DynoTableLink) -> None:
         self.code = int(r.get('ResponseMetadata', {}).get('HTTPStatusCode', 500))
         self.ok = self.code == 200
         self.count = r.get("Count") or 0
@@ -38,27 +39,33 @@ class DynoResponse:
 
         if "Items" in r:
             items = r.get("Items") or []
-            if table is None:
+            if link is None:
                 self.data = items
             else:
                 self.data = list[dict]()
                 for item in items:
-                    row = table.dyno2data(item)
+                    row = link.table.read(item, link.schema, link.globalindex)
                     self.data.append(row)
-            return self
+            return
+
+        if "Item" in r:
+            if link is None:
+                self.data = r['Item']
+            else:
+                self.data = link.table.read(r['Item'], link.schema, link.globalindex)
+            return
 
         if "Attributes" in r:
             items = r.get("Attributes") or []
-            if table is None:
+            if link is None:
                 self.data = items
             else:
                 self.data = list[dict]()
                 for item in items:
-                    row = table.dyno2data(item)
+                    row = link.table.read(item, link.schema, link.globalindex)
                     self.data.append(row)
-            return self
-
-        return self
+            return
+        return
 
     def __repr__(self):
         if self.ok and self.data is None:
@@ -135,11 +142,11 @@ class DynoConnect:
         ddb = boto3.resource('dynamodb', **params)
         return ddb
 
-    def insert(self, data: dict, table: Type[DynoTypeTable], schema: str) -> DynoResponse:
+    def insert(self, data: dict, table: Type[DynoTable], schema: str) -> DynoResponse:
         dr = DynoResponse()
         try:
             item = table.write_key(data, schema=schema)
-            dr.data = table.dyno2data(item)
+            dr.data = table.read(item)
 
             db = self.client()
             conditional = f"attribute_not_exists({table.Key.pk}) AND attribute_not_exists({table.Key.sk})"
@@ -150,7 +157,8 @@ class DynoConnect:
                 ReturnConsumedCapacity="INDEXES",
                 ReturnItemCollectionMetrics="SIZE",
             )
-            dr.set_response(r, table)
+            link = table.get_link(schema)
+            dr.set_response(r, link)
             if dr.code != 200:
                 logger.error(f"DynoConnect.insert({table.TableName}[{schema}])")
                 dr.set_error(dr.code, f"Failed to insert {table.TableName}[{schema}")
@@ -159,18 +167,20 @@ class DynoConnect:
             dr.set_error(500, f"{e!r}")
         return dr
 
-    def delete_item(self, data: dict, table: Type[DynoTypeTable], schema: str) -> DynoResponse:
+    def delete_item(self, data: dict, table: Type[DynoTable], schema: str) -> DynoResponse:
         dr = DynoResponse()
 
         try:
             tbl = table.get_schema(schema)
             if tbl is None:
-                return dr.set_error(400, f"Schema {schema} not found")
+                dr.set_error(400, f"Schema {schema} not found")
+                return dr
 
             key = table.Key
             fmt = tbl.Key
             if fmt is None:
-                return dr.set_error(400, f"Key format for {schema} not found")
+                dr.set_error(400, f"Key format for {schema} not found")
+                return dr
 
             #
             # generate key values
@@ -178,7 +188,8 @@ class DynoConnect:
             pk = fmt.format_pk(data)
             sk = fmt.format_sk(data)
             if pk is None or sk is None:
-                return dr.set_error(400, "One or more key values are not available")
+                dr.set_error(400, "One or more key values are not available")
+                return dr
 
             params = {
                 "TableName": table.TableName,
@@ -197,7 +208,8 @@ class DynoConnect:
 
             db = self.client()
             r = db.delete_item(**params)
-            dr.set_response(r, table)
+            link = table.get_link(schema)
+            dr.set_response(r, link)
             if dr.data is None:
                 dr.data = []
             dr.ok = len(data) > 0
@@ -211,31 +223,35 @@ class DynoConnect:
                 dr.set_error(500, f"{e!r}")
         return dr
 
-    def isexist(self, data: dict, table: Type[DynoTypeTable], schema: str, globalindex: None | str = None) -> bool:
+    def isexist(self, data: dict, table: Type[DynoTable], schema: str, globalindex: None | str = None) -> bool:
         dr = self.fetch(data, table, schema, globalindex)
         return dr.ok
 
-    def fetch(self, data: dict, table: Type[DynoTypeTable],
+    def fetch(self, data: dict, table: Type[DynoTable],
               schema: str, globalindex: None | str = None) -> DynoResponse:
         dr = DynoResponse()
 
         try:
             tbl = table.get_schema(schema)
             if tbl is None:
-                return dr.set_error(400, f"Schema {schema} not found")
+                dr.set_error(400, f"Schema {schema} not found")
+                return dr
 
             key = table.Key
             fmt = tbl.Key
             if fmt is None:
-                return dr.set_error(400, f"Key format for {schema} not found")
+                dr.set_error(400, f"Key format for {schema} not found")
+                return dr
 
             if isinstance(globalindex, str):
                 key = table.GlobalIndexes.get(globalindex)
                 if key is None:
-                    return dr.set_error(400, f"GlobalIndex {globalindex} not found")
+                    dr.set_error(400, f"GlobalIndex {globalindex} not found")
+                    return dr
                 fmt = tbl.GlobalIndexes.get(globalindex)
                 if fmt is None:
-                    return dr.set_error(400, f"Key format for {globalindex} not found")
+                    dr.set_error(400, f"Key format for {globalindex} not found")
+                    return dr
 
             #
             # generate key values
@@ -243,7 +259,8 @@ class DynoConnect:
             pk = fmt.format_pk(data)
             sk = fmt.format_sk(data)
             if pk is None or sk is None:
-                return dr.set_error(400, "One or more key values are not available")
+                dr.set_error(400, "One or more key values are not available")
+                return dr
 
             params = {
                 "TableName": table.TableName,
@@ -263,7 +280,8 @@ class DynoConnect:
 
             db = self.client()
             r = db.query(**params)
-            dr.set_response(r, table)
+            link = table.get_link(schema, globalindex)
+            dr.set_response(r, link)
             if dr.data is None:
                 dr.data = []
             dr.ok = len(data) > 0
@@ -277,18 +295,20 @@ class DynoConnect:
                 dr.set_error(500, f"{e!r}")
         return dr
 
-    def get_item(self, data: dict, table: Type[DynoTypeTable], schema: str) -> DynoResponse:
+    def get_item(self, data: dict, table: Type[DynoTable], schema: str) -> DynoResponse:
         dr = DynoResponse()
 
         try:
             tbl = table.get_schema(schema)
             if tbl is None:
-                return dr.set_error(400, f"Schema {schema} not found")
+                dr.set_error(400, f"Schema {schema} not found")
+                return dr
 
             key = table.Key
             fmt = tbl.Key
             if fmt is None:
-                return dr.set_error(400, f"Key format for {schema} not found")
+                dr.set_error(400, f"Key format for {schema} not found")
+                return dr
 
             #
             # generate key values
@@ -296,29 +316,23 @@ class DynoConnect:
             pk = fmt.format_pk(data)
             sk = fmt.format_sk(data)
             if pk is None or sk is None:
-                return dr.set_error(400, "One or more key values are not available")
+                dr.set_error(400, "One or more key values are not available")
+                return dr
 
             params = {
                 "TableName": table.TableName,
                 "Key": {
-                    "#n1": {key.pk_type.value: pk},
-                    "#n2": {key.sk_type.value: sk}
+                    key.pk: {key.pk_type.value: pk},
+                    key.sk: {key.sk_type.value: sk}
                 },
                 "ConsistentRead": False,
                 "ReturnConsumedCapacity": "INDEXES",
-                "ExpressionAttributeNames": {
-                    "#n1": key.pk,
-                    "#n2": key.sk
-                }
             }
 
             db = self.client()
-            r = db.query(**params)
-            dr.set_response(r, table)
-            if dr.data is None:
-                dr.data = []
-            elif len(dr.data) >= 1:
-                dr.data = dr.data[0]  # only report one record or no record always
+            r = db.get_item(**params)
+            link = table.get_link(schema)
+            dr.set_response(r, link)
         except Exception as e:
             if type(e).__name__ == "ConditionalCheckFailedException":
                 dr.set_error(404, f"Not Found")
@@ -327,31 +341,83 @@ class DynoConnect:
                 dr.set_error(500, f"{e!r}")
         return dr
 
-    def update(self, data: dict, table: Type[DynoTypeTable], schema: str) -> DynoResponse:
+    def update(self, update: DynoUpdate) -> DynoResponse:
         dr = DynoResponse()
-        # Attributes
+
+        try:
+            params = update.write()
+            if params is None:
+                dr.set_error(500, "Update incomplete")
+                return dr
+
+            db = self.client()
+            r = db.query(**params)
+            dr.set_response(r, update.get_link())
+            if dr.code != 200:
+                logger.error(f"DynoConnect.update({update.TableName})")
+                dr.errors.append(f"Failed to update {update.TableName}")
+        except Exception as e:
+            logger.exception(f"DynoConnect.update({update.TableName}) {e!r}")
+            dr.set_error(500, f"{e!r}")
         return dr
 
-    def query(self, data: dict, table: Type[DynoTypeTable], indexname: None | str = None) -> DynoResponse:
+    def query(self, query: DynoQuery) -> DynoResponse:
         dr = DynoResponse()
+        try:
+            params = query.write()
+            if params is None:
+                dr.set_error(500, "Query incomplete")
+                return dr
+
+            db = self.client()
+            r = db.query(**params)
+            dr.set_response(r, query.get_link())
+            if dr.code != 200:
+                logger.error(f"DynoConnect.query({query.TableName})")
+                dr.errors.append(f"Failed to query {query.TableName}")
+        except Exception as e:
+            logger.exception(f"DynoConnect.query({query.TableName}) {e!r}")
+            dr.set_error(500, f"{e!r}")
         return dr
 
-    def delete_table(self, table: Type[DynoTypeTable]) -> DynoResponse:
+    def table_delete(self, table: Type[DynoTable]) -> DynoResponse:
         dr = DynoResponse()
         try:
             db = self.client()
             r = db.delete_table(TableName=table.TableName)
 
-            dr.set_response(r, table)
+            dr.set_response(r, table.get_link())
             if dr.code != 200:
-                logger.error(f"DynoConnect.delete_table({table.TableName})")
+                logger.error(f"DynoConnect.table_delete({table.TableName})")
                 dr.errors.append(f"Failed to delete table {table.TableName}")
         except Exception as e:
-            logger.exception(f"DynoConnect.delete_table({table.TableName}) {e!r}")
-            dr.set_error(500, f"{e!r}")
+            if type(e).__name__ == "ClientError" and "protected against deletion" in e.args[0]:
+                logger.exception(f"DynoConnect.table_delete({table.TableName}) {e!r}")
+                dr.set_error(400, f"Table is delete protected")
+            else:
+                logger.exception(f"DynoConnect.table_delete({table.TableName}) {e!r}")
+                dr.set_error(500, f"{e!r}")
         return dr
 
-    def create_table(self, table: Type[DynoTypeTable]) -> DynoResponse:
+    def table_protect(self, table: Type[DynoTable], protect: bool) -> DynoResponse:
+        dr = DynoResponse()
+        try:
+            db = self.client()
+            r = db.update_table(TableName=table.TableName, DeletionProtectionEnabled=protect)
+            dr.set_response(r, table.get_link())
+            if dr.code != 200:
+                logger.error(f"DynoConnect.table_protect({table.TableName})")
+                dr.errors.append(f"Failed to update table {table.TableName}")
+        except Exception as e:
+            if type(e).__name__ == "ClientError" and "protected against deletion" in e.args[0]:
+                logger.exception(f"DynoConnect.table_protect({table.TableName}) {e!r}")
+                dr.set_error(400, f"Table is delete protected")
+            else:
+                logger.exception(f"DynoConnect.table_protect({table.TableName}) {e!r}")
+                dr.set_error(500, f"{e!r}")
+        return dr
+
+    def table_create(self, table: Type[DynoTable]) -> DynoResponse:
         dr = DynoResponse()
         try:
             KeySchema = table.table_create_keys()
@@ -372,11 +438,81 @@ class DynoConnect:
                 },
                 GlobalSecondaryIndexes=GlobalIndexes
             )
-            dr.set_response(r, table)
+            dr.set_response(r, table.get_link())
             if dr.code != 200:
-                logger.exception(f"DynoConnect.create_table({table.TableName})")
+                logger.exception(f"DynoConnect.table_create({table.TableName})")
                 dr.errors.append(f"Failed to create table {table.TableName}")
         except Exception as e:
-            logger.exception(f"DynoConnect.create_table({table.TableName}) {e!r}")
+            if type(e).__name__ == "ResourceInUseException":
+                logger.exception(f"DynoConnect.table_create({table.TableName}) {e!r}")
+                dr.set_error(400, "Table already exists")
+            else:
+                logger.exception(f"DynoConnect.table_create({table.TableName}) {e!r}")
+                dr.set_error(500, f"{e!r}")
+        return dr
+
+    def _insert_auto_increment(self, data: Dict[str, Any], table: Type[DynoTable], schema: str):
+        dr = DynoResponse()
+        db = self.client()
+        try:
+            tbl = table.get_schema(schema)
+            if tbl is None:
+                msg = f"DynoConnect._insert_auto_increment({table.TableName}.{schema})"
+                dr.set_error(404, msg)
+                return dr
+
+            pk = tbl.Key.format_pk(data)
+            sk = tbl.Key.format_pk(data)
+            item = {
+                table.Key.pk: {table.Key.pk_type.value: pk},
+                table.Key.sk: {table.Key.sk_type.value: sk}
+            }
+
+            if isinstance(table.SchemaFieldName, str) and len(table.SchemaFieldName) > 0:
+                if isinstance(tbl.SchemaFieldValue, str) and len(tbl.SchemaFieldValue) > 0:
+                    item[table.SchemaFieldName] = {"S": str(tbl.SchemaFieldValue)}
+
+            conditional = f"attribute_not_exists({table.Key.pk}) AND attribute_not_exists({table.Key.sk})"
+            r = db.put_item(
+                TableName=table.TableName,
+                Item=item,
+                ConditionExpression=conditional,
+                ReturnConsumedCapacity="INDEXES",
+                ReturnItemCollectionMetrics="SIZE",
+            )
+            link = table.get_link(schema)
+            dr.set_response(r, link)
+            if dr.code != 200:
+                logger.error(f"DynoConnect._insert_auto_increment({table.TableName}[{schema}])")
+                dr.set_error(dr.code, f"Failed to insert {table.TableName}[{schema}")
+        except Exception as e:
+            logger.exception(f"DynoConnect._insert_auto_increment({table.TableName}[{schema}])")
             dr.set_error(500, f"{e!r}")
         return dr
+
+    def auto_increment(self, data: Dict[str, Any], table: Type[DynoTable], schema: str,
+                       name: str, reset: bool = False) -> None | int:
+        params = table.auto_increment(data, schema, name, reset)
+        if params is None:
+            return None
+
+        db = self.client()
+        result = None
+
+        for retry in range(2):
+            try:
+                r = db.update_item(**params)
+                nextid = r.get("Attributes", dict()).get(name, dict()).get("N")
+                if nextid is None:
+                    break
+                result = int(nextid)
+                break
+            except Exception as e:
+                if type(e).__name__ == "ConditionalCheckFailedException":
+                    dr = self._insert_auto_increment(data, table, schema)
+                    if not dr.ok:
+                        break
+                else:
+                    logger.exception(f"DynoConnect.auto_increment({table.TableName}.{schema}.{name}) {e!r}")
+                    break
+        return result
