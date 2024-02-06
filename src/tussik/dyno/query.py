@@ -1,259 +1,170 @@
-import copy
 import logging
-from typing import Set, Any, Dict, Type
+from enum import Enum
+from typing import Set, Any, Dict, Type, Self
 
-from .attributes import DynoEnum
+from .filtering import DynoFilter, DynoFilterKey, DynoFilterState
 from .table import DynoTable, DynoTableLink
 
 logger = logging.getLogger()
 
 
+class DynoQuerySelectEnum(Enum):
+    all = "ALL_ATTRIBUTES"
+    projected = "ALL_PROJECTED_ATTRIBUTES"
+    specific = "SPECIFIC_ATTRIBUTES"
+    count = "COUNT"
+
+
 class DynoQuery:
     __slots__ = [
-        "_schema_obj", "_key_obj", "_key_fmt", "_key",
-        '_expression_set', '_expression_add', '_expression_remove', '_expression_delete',
-        '_attrib_names', '_attrib_values', '_counter', '_condition_exp',
-        '_page', '_page_size', '_data', '_link'
+        "_schema_obj", "_key_obj", "_key_fmt", "_key", "_consistent",
+        '_limit', '_data', '_link', "_asc", "_select", "_select_attributes",
+        "_filter", "_filter_key", "_filter_key_globalindex", "_start_key"
     ]
 
-    def __init__(self, data: Dict[str, Any], table: Type[DynoTable], schema: str, globalindex: None | str = None):
-        self._data = data
+    def __init__(self, table: Type[DynoTable], schema: str, globalindex: None | str = None):
         self._link = table.get_link(schema, globalindex)
-        self._counter = 0
-        self._condition_exp = list[str]()
-        self._expression_set = list[str]()
-        self._expression_add = list[str]()
-        self._expression_remove = list[str]()
-        self._expression_delete = list[str]()
-        self._attrib_names = dict[str, str]()
-        self._attrib_values = dict[str, dict[str, str | bool]]()
+
         self._key: None | dict = None
-        self._page: None | int = None
-        self._page_size: None | int = None
+
+        self._start_key = None
+        self._limit: None | int = None
+        self._asc: bool = True
+        self._consistent: bool = False
+
+        self._filter: DynoFilter = DynoFilter()
+        self._filter_key: DynoFilterKey = DynoFilterKey()
+        self._filter_key_globalindex: Dict[str, DynoFilterKey] = dict[str, DynoFilterKey]()
+
+        self._select = DynoQuerySelectEnum.projected if isinstance(globalindex, str) else DynoQuerySelectEnum.all
+        self._select_attributes = set[str]()
+
+        for name, gsi in table.GlobalIndexes.items():
+            self._filter_key_globalindex[name] = DynoFilterKey()
 
         self._schema_obj = table.get_schema(schema)
-        if isinstance(self._globalindex, str):
-            self._key_obj = self._table.GlobalIndexes.get(self._globalindex)
-            self._key_fmt = self._schema_obj.Key
+        if isinstance(self._link.globalindex, str):
+            self._key_obj = self._link.table.GlobalIndexes.get(self._link.globalindex)
+            self._key_fmt = self._schema_obj.GlobalIndexes.get(self._link.globalindex)
         elif self._schema_obj is not None:
-            self._key_obj = self._table.Key
-            self._key_fmt = self._schema_obj.GlobalIndexes.get(self._globalindex)
+            self._key_obj = self._link.table.Key
+            self._key_fmt = self._schema_obj.Key
+        else:
+            self._key_obj = None
+            self._key_fmt = None
+
+        self._filter_key.pk(self._schema_obj.Key.format_pk(dict()))
+        for name, gsi in self._schema_obj.GlobalIndexes.items():
+            self._filter_key_globalindex[name].pk(gsi.format_pk(dict()))
 
     @property
     def TableName(self) -> str:
-        return self._table.TableName
+        return self._link.table.TableName
 
     def get_link(self) -> DynoTableLink:
         return self._link
 
-    def set_pagination(self, page: int = 1, page_size: int = 100):
-        self._page = max(1, page)
-        self._page_size = max(1, page_size)
-
     def set_limit(self, max_results: None | int = None):
         if max_results is None or max_results <= 0:
-            self._page = None
-            self._page_size = None
+            self._limit = None
         else:
-            self._page = 1
-            self._page_size = max(1, max_results)
+            self._limit = max(1, max_results)
+
+    def set_consistent_read(self, consistent: None | bool = None):
+        self._consistent = consistent if isinstance(consistent, bool) else False
+
+    def set_order(self, asc: None | bool = None) -> None:
+        self._asc = asc if isinstance(asc, bool) else True
+
+    def set_select(self, option: DynoQuerySelectEnum):
+        self._select = option
+
+    def set_select_attributes(self, names: Set[str]):
+        for name in names:
+            self._select_attributes.add(name)
+
+    def FilterExpression(self) -> DynoFilter:
+        return self._filter
+
+    def StartKey(self, startkey: None | Dict[str, Dict[str, Any]]) -> Self:
+        self._start_key = dict()
+
+        if isinstance(startkey, dict):
+            for k, v in startkey.items():
+                if isinstance(v, dict):
+                    dt = next(iter(v))
+                    val = v.get(dt)
+                    if k == self._link.table.Key.pk and dt == self._link.table.Key.pk_type.value:
+                        self._start_key[k] = {dt: val}
+                    elif k == self._link.table.Key.sk and dt == self._link.table.Key.sk_type.value:
+                        self._start_key[k] = {dt: val}
+
+        if len(self._start_key) == 0:
+            self._start_key = None
+        return self
+
+    def FilterKey(self) -> DynoFilterKey:
+        return self._filter_key
+
+    def FilterGlobalIndex(self, globalindex: str) -> None | DynoFilterKey:
+        return self._filter_key_globalindex.get(globalindex)
 
     def write(self) -> None | Dict[str, Any]:
-        result = dict()
+        params = dict()
 
-        result['TableName'] = self._table.TableName
+        params['TableName'] = self._link.table.TableName
+        if isinstance(self._link.globalindex, str):
+            params['IndexName'] = self._link.globalindex
 
-        return result
+        state = DynoFilterState()
 
-    def add_value(self, value: None | bool | int | float | str | bytes | dict) -> str:
-        self._counter += 1
-        key = f":v{self._counter}"
+        if not self._filter.is_empty():
+            params['FilterExpression'] = self._filter.write(state)
 
-        #
-        # TODO: list, map, stringlist, numberlist, bytelist
-        # TODO: common use with similar other function
-        #
+        statements = list[str]()
+        if not self._filter_key.is_empty():
+            s1 = self._filter_key.write(self._link.table.Key, state)
+            if s1 is not None:
+                statements.append(s1)
+        if isinstance(self._link.globalindex, str):
+            for name, gsi_filter in self._filter_key_globalindex.items():
+                gsi = self._link.table.GlobalIndexes.get(name)
+                s1 = gsi_filter.write(gsi, state)
+                if s1 is not None:
+                    statements.append(s1)
+        if len(statements) > 0:
+            params['KeyConditionExpression'] = " AND ".join(statements)
 
-        if isinstance(value, dict):
-            self._attrib_values[key] = value
-        elif isinstance(value, bool):
-            self._attrib_values[key] = {DynoEnum.Boolean.value: value}
-        elif isinstance(value, int):
-            self._attrib_values[key] = {DynoEnum.Number.value: str(value)}
-        elif isinstance(value, float):
-            self._attrib_values[key] = {DynoEnum.Number.value: str(value)}
-        elif isinstance(value, str):
-            self._attrib_values[key] = {DynoEnum.String.value: str(value)}
-        elif isinstance(value, bytes):
-            self._attrib_values[key] = {DynoEnum.Bytes.value: str(value)}
+        if len(self._select_attributes) > 0:
+            # provided attributes means select specific
+            params['ProjectionExpression'] = ", ".join(self._select_attributes)
+            params['Select'] = DynoQuerySelectEnum.specific
         else:
-            self._attrib_values[key] = {DynoEnum.Null.value: True}
-
-        return key
-
-    def add_name(self, name: str) -> str:
-        self._counter += 1
-        key = f"#n{self._counter}"
-        self._attrib_names[key] = name
-        return key
-
-    def ok(self) -> bool:
-        n = 0
-        n += len(self._expression_set)
-        n += len(self._expression_add)
-        n += len(self._expression_remove)
-        n += len(self._expression_delete)
-        return n > 0
-
-    def get_key(self) -> None | dict:
-        return self._key
-
-    def add_key(self, data: Dict[str, Any]) -> None:
-        if self._schema_obj is None:
-            self._key = None
-            return
-
-        pk = self._key_fmt.format_pk(data)
-        sk = self._key_fmt.format_sk(data)
-        if pk is None or sk is None:
-            self._key = None
-            return
-
-        pk_n = self.add_name(self._key_obj.pk)
-        pk_v = self.add_name(self._key_obj.pk)
-        sk_n = self.add_name(self._key_obj.sk)
-        sk_v = self.add_name(self._key_obj.sk)
-
-        self._key = {
-            pk_n: {self._key_obj.pk_type.value: pk},
-            sk_n: {self._key_obj.sk_type.value: sk},
-        }
-
-        self._condition_exp.append(f"{pk_n} = {pk_v}")
-        self._condition_exp.append(f"{sk_n} = {sk_v}")
-
-    def get_conditional_expression(self) -> str:
-        return " AND ".join(self._condition_exp)
-
-    def get_expression(self) -> str:
-        text = ""
-
-        if len(self._expression_set) > 0:
-            text += f"SET {','.join(self._expression_set)} "
-
-        if len(self._expression_add) > 0:
-            text += f"ADD {','.join(self._expression_set)} "
-
-        if len(self._expression_remove) > 0:
-            text += f"REMOVE {','.join(self._expression_set)} "
-
-        if len(self._expression_delete) > 0:
-            text += f"DELETE {','.join(self._expression_set)} "
-
-        return text
-
-    def get_names(self) -> Dict[str, str]:
-        return copy.deepcopy(self._attrib_names)
-
-    def get_values(self) -> Dict[str, dict[str, str | bool]]:
-        return copy.deepcopy(self._attrib_values)
-
-    def apply_auto_increment(self, fieldname: str, step: int = 1):
-        alias_n = self.add_name(fieldname)
-        alias_1 = self.add_value(step)
-        alias_0 = self.add_value(0)
-        stmt = f"{alias_n} = if_not_exists({alias_n}, {alias_0}) + {alias_1}"
-        self._expression_set.append(stmt)
-
-    def custom_set(self, statement: str) -> None:
-        self._expression_set.append(statement)
-
-    def custom_add(self, statement: str) -> None:
-        self._expression_add.append(statement)
-
-    def custom_delete(self, statement: str) -> None:
-        self._expression_delete.append(statement)
-
-    def custom_remove(self, statement: str) -> None:
-        self._expression_remove.append(statement)
-
-    def apply_add(self, dataset: Dict[str, Any]) -> None:
-        key = next(iter(dataset))
-        if isinstance(dataset[key], dict):
-            data = dataset
-        else:
-            data = self._table.read(dataset)
-        self._extract("ADD", data)
-
-    def apply_set(self, dataset: Set[str] | Dict[str, Any]) -> None:
-        if isinstance(dataset, list):
-            data = dict()
-            for item in dataset:
-                data[item] = {"NULL": True}
-        else:
-            key = next(iter(dataset))
-            if isinstance(dataset[key], dict):
-                data = dataset
+            if not isinstance(self._link.globalindex, str) and self._select == DynoQuerySelectEnum.projected:
+                # not a global index with projected, the closest value is "all"
+                params['Select'] = DynoQuerySelectEnum.all.value
             else:
-                data = self._table.read(dataset)
-        self._extract("SET", data)
+                params['Select'] = self._select.value
 
-    def apply_remove(self, dataset: Set[str] | Dict[str, Any]) -> None:
-        if isinstance(dataset, list):
-            data = dict()
-            for item in dataset:
-                data[item] = {"NULL": True}
-        else:
-            key = next(iter(dataset))
-            if isinstance(dataset[key], dict):
-                data = dataset
-            else:
-                data = self._table.read(dataset)
-        self._extract("REMOVE", data)
+        params |= state.write()
 
-    def apply_delete(self, dataset: Set[str] | Dict[str, Any]) -> None:
-        if isinstance(dataset, list):
-            data = dict()
-            for item in dataset:
-                data[item] = {"NULL": True}
-        else:
-            key = next(iter(dataset))
-            if isinstance(dataset[key], dict):
-                data = dataset
-            else:
-                data = self._table.read(dataset)
-        self._extract("DELETE", data)
+        params['ScanIndexForward'] = self._asc
+        if isinstance(self._limit, int):
+            params['Limit'] = self._limit
+        params['ConsistentRead'] = self._consistent
 
-    def _extract(self, action: str, dataset: Dict[str, dict], prefix: None | str = None) -> None:
-        for k, v in dataset.items():
-            key = k if prefix is None else f"{prefix}{k}"
-            if key in self._attrib_names:
-                continue
+        if isinstance(self._start_key, str):
+            params['ExclusiveStartKey'] = {
+                self._key_obj.sk: {"S": str(self._start_key)}
+            }
+        elif isinstance(self._start_key, (int, float)):
+            params['ExclusiveStartKey'] = {
+                self._key_obj.sk: {"N": str(self._start_key)}
+            }
+        elif isinstance(self._start_key, bytes):
+            params['ExclusiveStartKey'] = {
+                self._key_obj.sk: {"B": self._start_key}
+            }
 
-            datatype = next(iter(v))
-
-            if datatype == "M":
-                self._extract(action, v, k)
-                continue
-
-            self._counter += 1
-            idx = self._counter
-
-            if action == "SET":
-                self._expression_set.append(f"#n{idx} = :v{idx}")
-                self._attrib_names[f"#n{idx}"] = key
-                self._attrib_values[f":v{idx}"] = v
-            elif action == "ADD":
-                self._expression_add.append(f"#n{idx} = :v{idx}")
-                self._attrib_names[f"#n{idx}"] = key
-                self._attrib_values[f":v{idx}"] = v
-            elif action == "REMOVE":
-                if datatype == "NULL":
-                    self._expression_remove.append(f"#n{idx}")
-                else:
-                    self._expression_remove.append(f"#n{idx} = :v{idx}")
-                self._attrib_names[f"#n{idx}"] = key
-                self._attrib_values[f":v{idx}"] = v
-            elif action == "DELETE":
-                self._expression_delete.append(f"#n{idx}")
-                self._attrib_names[f"#n{idx}"] = key
+        params["ReturnConsumedCapacity"] = "INDEXES"
+        return params

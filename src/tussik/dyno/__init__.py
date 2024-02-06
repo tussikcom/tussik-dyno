@@ -6,6 +6,7 @@ from .attributes import DynoAttrDateTime, DynoEnum, DynoAttrFlag, DynoAttrFloat
 from .attributes import DynoAttrFloatList, DynoAttrInt, DynoAttrIntList, DynoAttrList
 from .attributes import DynoAttrIntEnum, DynoAttrStrEnum
 from .attributes import DynoAttrMap, DynoAttrString, DynoAttrStringList, DynoAttrUuid
+from .filtering import DynoFilter, DynoFilterKey, DynoOpEnum
 from .table import DynoGlobalIndex, DynoKey, DynoKeyFormat, DynoSchema, DynoTable, DynoTableLink
 from .update import DynoUpdate
 
@@ -23,6 +24,9 @@ __version__ = ""  # importlib_metadata.version(__name__)
 __all__ = [
     "__version__",
     "DynoConnect",
+    "DynoOpEnum",
+    "DynoFilter",
+    "DynoFilterKey",
     "DynoResponse",
     "DynoUpdate",
     "DynoGlobalIndex",

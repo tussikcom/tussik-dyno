@@ -30,10 +30,13 @@ class DynoUpdate:
         self._schema_obj = table.get_schema(schema)
         if isinstance(self._link.globalindex, str):
             self._key_obj = self._link.table.GlobalIndexes.get(self._link.globalindex)
-            self._key_fmt = self._schema_obj.Key
+            self._key_fmt = self._schema_obj.GlobalIndexes.get(self._link.globalindex)
         elif self._schema_obj is not None:
             self._key_obj = self._link.table.Key
-            self._key_fmt = self._schema_obj.GlobalIndexes.get(self._link.globalindex)
+            self._key_fmt = self._schema_obj.Key
+        else:
+            self._key_obj = None
+            self._key_fmt = None
 
     @property
     def TableName(self) -> str:
@@ -42,12 +45,76 @@ class DynoUpdate:
     def get_link(self) -> DynoTableLink:
         return self._link
 
-    def write(self) -> None | Dict[str, Any]:
-        result = dict()
+    def write(self, data: Dict[str, Any]) -> None | Dict[str, Any]:
+        params = dict[str, Any]()
+        result = dict[str, dict[str, Any]]()
 
-        result['TableName'] = self._link.table.TableName
+        #
+        # not setup for success
+        #
+        if self._schema_obj is None or self._key_obj is None or self._key_fmt is None:
+            logger.error(f"DynoUpdate.write: no schema, key or formatting found")
+            return None
 
-        return result
+        #
+        # tables, indexes, and keys
+        #
+        params['TableName'] = self._link.table.TableName
+        if isinstance(self._link.globalindex, str):
+            params['Indexname'] = self._link.globalindex
+        if self._schema_obj:
+            value = self._schema_obj.Key.write(self._link.table.Key, data)
+            if value is not None:
+                result |= value
+            for name, gsi in self._link.table.GlobalIndexes.items():
+                fmt = self._schema_obj.GlobalIndexes.get(name)
+                if fmt is not None:
+                    value = fmt.write(gsi, data)
+                    if value is not None:
+                        result |= value
+
+        #
+        # TODO: because param-A was set, that alters GSI param-B as SET entries, or delete GSI param-B
+        # TODO: because param-A is null, that alters GSI param-B as DELETE entries
+        # TODO: always params get updated as SET entries
+        #
+        pass
+
+        #
+        # changes
+        #
+        params['Key'] = self._key_fmt.write(self._key_obj, data)
+        params['ExpressionAttributeValues'] = self.get_values()
+        params['ExpressionAttributeNames'] = self.get_names()
+        params['ReturnValues'] = "UPDATED_NEW"
+        params['ReturnConsumedCapacity'] = "TOTAL"
+        params['UpdateExpression'] = self.get_expression()
+        current_count = self._counter
+
+        #
+        # constraints
+        #
+        # TODO: change from not_exist to a match statement such as "#n1 = :v1"
+        cond_list = list[str]()
+        counter = 0
+        if isinstance(self._link.globalindex, str):
+            for name, gsi in self._link.table.GlobalIndexes.items():
+                if gsi.unique and gsi.pk in result:
+                    counter += 1
+                    params['ExpressionAttributeNames'][f"#k{counter}"] = gsi.pk
+                    params['ExpressionAttributeValues'][f":k{counter}"] = {gsi.pk_type.value: ""}
+                    cond_list.append(f"#k{counter} = :k{counter}")
+                if gsi.unique and gsi.sk in result:
+                    counter += 1
+                    params['ExpressionAttributeNames'][f"#k{counter}"] = gsi.sk
+                    params['ExpressionAttributeValues'][f":k{counter}"] = {gsi.pk_type.value: ""}
+                    cond_list.append(f"#k{counter} = :k{counter}")
+        else:
+            cond_list.append(f"attribute_not_exists({self._link.table.Key.pk})")
+            cond_list.append(f"attribute_not_exists({self._link.table.Key.sk})")
+        params['ConditionExpression'] = " AND ".join(cond_list)
+
+        return params
 
     def add_value(self, value: None | bool | int | float | str | bytes | dict) -> str:
         self._counter += 1

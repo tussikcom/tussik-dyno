@@ -20,10 +20,13 @@ class DynoKey:
                  pk: None | str = None, sk: None | str = None,
                  pk_type: None | DynoEnum = None, sk_type: None | DynoEnum = None
                  ):
-        self.pk = pk or "pk"
-        self.sk = sk or "sk"
-        self.pk_type = pk_type or DynoEnum.String
-        self.sk_type = sk_type or DynoEnum.String
+        self.pk: str = pk or "pk"
+        self.sk: str = sk or "sk"
+        self.pk_type: DynoEnum = pk_type or DynoEnum.String
+        self.sk_type: DynoEnum = sk_type or DynoEnum.String
+
+    def __repr__(self):
+        return f"DynoKey: {self.pk}, {self.sk}"
 
     def read(self, data: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         result = dict[str, Any]()
@@ -47,24 +50,46 @@ class DynoKeyFormat:
     __slots__ = ["pk", "sk", "req"]
 
     def __init__(self, pk: None | str = None, sk: None | str = None, req: None | Set[str] = None):
-        self.pk = pk
-        self.sk = sk
-        self.req = req or set[str]()
+        self.pk: str = pk
+        self.sk: str = sk
+        self.req: Set[str] = req or set[str]()
+
+    def __repr__(self):
+        return f"DynoKeyFormat: pk={self.pk}, sk={self.sk}"
+
+    def write(self, key: DynoKey, values: None | Dict[str, Any]) -> None | Dict[str, Dict[str, Any]]:
+        pval = self.format_pk(values)
+        if pval is None:
+            return None
+        sval = self.format_sk(values)
+        if sval is None:
+            return None
+        results = {
+            key.pk: {key.pk_type.value: pval},
+            key.sk: {key.sk_type.value: sval},
+        }
+        return results
 
     def format_pk(self, values: None | Dict[str, Any] = None) -> None | str:
         if self.pk is not None:
-            for item in self.req:
-                if item not in values:
-                    return None
-            return self.pk.format(**(values or dict()))
+            # for item in self.req:
+            #     if item not in values:
+            #         break
+            try:
+                return self.pk.format(**(values or dict()))
+            except Exception as e:
+                pass
         return None
 
     def format_sk(self, values: None | Dict[str, Any] = None) -> None | str:
         if self.sk is not None:
-            for item in self.req:
-                if item not in values:
-                    return None
-            return self.sk.format(**(values or dict()))
+            # for item in self.req:
+            #     if item not in values:
+            #         return None
+            try:
+                return self.sk.format(**(values or dict()))
+            except Exception as e:
+                pass
         return None
 
 
@@ -72,14 +97,16 @@ class DynoGlobalIndex:
     def __init__(self,
                  pk: None | str = None, sk: None | str = None,
                  pk_type: None | DynoEnum = None, sk_type: None | DynoEnum = None,
-                 read_unit: None | int = None, write_unit: None | int = None
+                 read_unit: None | int = None, write_unit: None | int = None,
+                 unique: None | bool = None
                  ):
-        self.pk = pk or "pk"
-        self.sk = sk or "sk"
-        self.pk_type = pk_type or DynoEnum.String
-        self.sk_type = sk_type or DynoEnum.String
-        self.read_unit = read_unit or 1
-        self.write_unit = write_unit or 1
+        self.pk: str = pk or "pk"
+        self.sk: str = sk or "sk"
+        self.pk_type: DynoEnum = pk_type or DynoEnum.String
+        self.sk_type: DynoEnum = sk_type or DynoEnum.String
+        self.read_unit: int = read_unit or 1
+        self.write_unit: int = write_unit or 1
+        self.unique: bool = unique or True
 
     def read(self, data: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         result = dict[str, Any]()
@@ -103,10 +130,10 @@ class DynoSchema:
     Key: DynoKeyFormat = ...
     SchemaFieldValue: None | str = None
     GlobalIndexes = dict[str, DynoKeyFormat]()
-    SchemaTypeFieldName: None | str = None
+    # SchemaTypeFieldName: None | str = None
 
     def __repr__(self):
-        return f"DynoSchema"
+        return f"DynoSchema: {self.SchemaFieldValue}"
 
     @classmethod
     def get_attributes(cls) -> Dict[str, DynoAttrBase]:

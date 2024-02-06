@@ -3,6 +3,7 @@ from typing import Any, Type, Dict
 
 import boto3
 
+from .attributes import DynoAttrDateTime
 from .query import DynoQuery
 from .table import DynoTable, DynoTableLink
 from .update import DynoUpdate
@@ -11,7 +12,7 @@ logger = logging.getLogger()
 
 
 class DynoResponse:
-    __slots__ = ["ok", "code", "errors", "data", "consumed", "attributes", "count", "scanned"]
+    __slots__ = ["ok", "code", "errors", "data", "consumed", "attributes", "count", "scanned", "LastEvaluatedKey"]
 
     def __init__(self):
         self.ok = True
@@ -22,17 +23,19 @@ class DynoResponse:
         self.consumed = 0.0
         self.data: Any = None
         self.attributes = dict()
+        self.LastEvaluatedKey: None | Dict[str, Dict[str, Any]] = None
 
     def set_error(self, code: int, message: str) -> None:
         self.ok = False
         self.code = code
         self.errors.append(message)
 
-    def set_response(self, r: dict, link: None | DynoTableLink) -> None:
+    def set_response(self, r: dict, link: None | DynoTableLink = None) -> None:
         self.code = int(r.get('ResponseMetadata', {}).get('HTTPStatusCode', 500))
         self.ok = self.code == 200
         self.count = r.get("Count") or 0
         self.scanned = r.get("ScannedCount") or 0
+        self.LastEvaluatedKey = r.get("LastEvaluatedKey")
 
         if "ConsumedCapacity" in r:
             self.consumed = r.get("ConsumedCapacity", dict()).get("CapacityUnits") or 0.0
@@ -95,6 +98,12 @@ class DynoConnect:
         self._secret = secret or DynoConnect.__g_secret
         self._region = region or DynoConnect.__g_region
 
+    def __repr__(self):
+        if self._host is not None:
+            return f"DynoConnect: {self._host}"
+        else:
+            return f"DynoConnect: aws"
+
     @classmethod
     def set_host(cls, host: None | str = None) -> None:
         cls.__g_host = host or "http://localhost:8000"
@@ -148,12 +157,22 @@ class DynoConnect:
             item = table.write_key(data, schema=schema)
             dr.data = table.read(item)
 
+            cond_list = list[str]()
+            cond_list.append(f"attribute_not_exists({table.Key.pk})")
+            cond_list.append(f"attribute_not_exists({table.Key.sk})")
+
+            # enforce gsi uniqueness when enabled
+            for name, gsi in table.GlobalIndexes.items():
+                if gsi.unique and gsi.pk in item:
+                    cond_list.append(f"attribute_not_exists({gsi.pk})")
+                if gsi.unique and gsi.sk in item:
+                    cond_list.append(f"attribute_not_exists({gsi.sk})")
+
             db = self.client()
-            conditional = f"attribute_not_exists({table.Key.pk}) AND attribute_not_exists({table.Key.sk})"
             r = db.put_item(
                 TableName=table.TableName,
                 Item=item,
-                ConditionExpression=conditional,
+                ConditionExpression=" AND ".join(cond_list),
                 ReturnConsumedCapacity="INDEXES",
                 ReturnItemCollectionMetrics="SIZE",
             )
@@ -375,6 +394,10 @@ class DynoConnect:
             if dr.code != 200:
                 logger.error(f"DynoConnect.query({query.TableName})")
                 dr.errors.append(f"Failed to query {query.TableName}")
+
+            if "LastEvaluatedKey" in r:
+                query.StartKey(dr.LastEvaluatedKey)
+
         except Exception as e:
             logger.exception(f"DynoConnect.query({query.TableName}) {e!r}")
             dr.set_error(500, f"{e!r}")
@@ -487,6 +510,33 @@ class DynoConnect:
                 dr.set_error(dr.code, f"Failed to insert {table.TableName}[{schema}")
         except Exception as e:
             logger.exception(f"DynoConnect._insert_auto_increment({table.TableName}[{schema}])")
+            dr.set_error(500, f"{e!r}")
+        return dr
+
+    def set_time_to_live(self, table: Type[DynoTable], expired_time_attribute: str, enable: bool) -> DynoResponse:
+        dr = DynoResponse()
+
+        confirmed = False
+        for schema, tbl in table.get_schemas().items():
+            for name, attrib in tbl.get_attributes():
+                if name == expired_time_attribute and isinstance(attrib, DynoAttrDateTime):
+                    confirmed = True
+        if not confirmed:
+            dr.set_error(404, f"The DateTime Attribute {expired_time_attribute} was not found")
+            return dr
+
+        db = self.client()
+        try:
+            r = db.update_time_to_live(
+                TableName=table.TableName,
+                TimeToLiveSpecification={
+                    "Enabled": enable,
+                    "AttributeName": expired_time_attribute
+                }
+            )
+            dr.set_response(r)
+        except Exception as e:
+            logger.exception(f"DynoConnect.set_time_to_live({table.TableName}, {expired_time_attribute}, {enable})")
             dr.set_error(500, f"{e!r}")
         return dr
 

@@ -3,6 +3,7 @@ from enum import Enum
 
 from tussik.dyno import *
 from tussik.dyno.attributes import DynoAttribAutoIncrement
+from tussik.dyno.query import DynoQuery
 
 
 class SampleAddress(DynoAttrMap):
@@ -137,3 +138,28 @@ class TestDyno:
         userid = dr.data.get('userid')
         dr = db.get_item(dr.data, SampleTable, "User")
         assert dr.ok
+
+    def test_query_pk(self):
+        query = DynoQuery(SampleTable, "Account")
+        #query.FilterKey().pk("AAABBBCCC")
+
+        #query.FilterKey().op(DynoOpEnum.eq, "sortkey#value")
+        #query.FilterExpression().op("accountid", "=", "AAABBBCCC")
+        #query.FilterGlobalIndex("gsi1").Contains("test_gsi1")
+
+        query.set_limit(5)
+        params = query.write()
+
+        # r = ddo.query(
+        #     TableName="primary",
+        #     ExpressionAttributeValues={":v1": {"S": "account#"}},
+        #     KeyConditionExpression="pk = :v1"
+        # )
+
+        db = DynoConnect()
+        dr = db.query(query)
+
+        if dr.LastEvaluatedKey:
+            dr = db.query(query)
+
+        assert True
