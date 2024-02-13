@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Any, Self, List
 
 from .attributes import DynoEnum
-from .table import DynoKey
+from .table import DynoKey, DynoGlobalIndex
 
 logger = logging.getLogger()
 
@@ -113,7 +113,7 @@ class DynoFilter:
 
         for item in self._stack:
             if item['type'] == "scope":
-                value = item['filter'].write(state)
+                value = item['filter'].write_encode(state)
                 if len(statement) > 0:
                     flat = " AND ".join(statement)
                     statement = list[str]()
@@ -303,7 +303,7 @@ class DynoFilterKey:
         else:
             self._pk_value = None
 
-    def write(self, key: DynoKey, state: DynoFilterState) -> None | str:
+    def write(self, key: DynoKey | DynoGlobalIndex, state: DynoFilterState) -> None | str:
         statement = list[str]()
 
         if self._pk_value is not None:
@@ -315,7 +315,7 @@ class DynoFilterKey:
 
         for item in self._stack:
             if item['type'] == "scope":
-                value = item['filter'].write(keyname, state)
+                value = item['filter'].write_encode(keyname, state)
                 if len(statement) > 0:
                     flat = " AND ".join(statement)
                     statement = list[str]()
@@ -363,7 +363,7 @@ class DynoFilterKey:
     def reset(self):
         self._stack = list()
 
-    def op(self, op: DynoOpEnum, value: Any) -> Self:
+    def op(self, op: str | DynoOpEnum, value: Any) -> Self:
         self._stack.append({
             "type": "value",
             "op": DynoOpEnum.write(op),

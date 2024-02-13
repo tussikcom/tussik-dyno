@@ -40,23 +40,17 @@ class SampleTable(DynoTable):
     WriteCapacityUnits: int = 1
 
     Key = DynoKey("pk", "sk")
-    GlobalIndexes = {
-        "gsi1": DynoGlobalIndex("gsi1_pk", "gsi1_sk", read_unit=1, write_unit=1),
-        "gsi2": DynoGlobalIndex("gsi2_pk", "gsi2_sk")
-    }
+    Gsi1 = DynoGlobalIndex("gsi1_pk", "gsi1_sk", read_unit=1, write_unit=1)
+    Gsi2 = DynoGlobalIndex("gsi2_pk", "gsi2_sk")
 
     class AutoIncrement(DynoSchema):
-        SchemaFieldValue = "autoincrement"
         Key = DynoKeyFormat(pk="autoincrement#", sk="autoincrement#")
         next_accountid = DynoAttribAutoIncrement()
         next_moonid = DynoAttribAutoIncrement()
 
     class Account(DynoSchema):
-        SchemaFieldValue = "account"
         Key = DynoKeyFormat(pk="account#", sk="accountid#{accountid}", req={"accountid"})
-        GlobalIndexes = {
-            "gsi1": DynoKeyFormat(pk="account#", sk="alias#{alias}", req={"alias"}),
-        }
+        Gsi1 = DynoKeyFormat(pk="account#", sk="alias#{alias}", req={"alias"})
         accountid = DynoAttrUuid()
         next_userid = DynoAttribAutoIncrement()
         active = DynoAttrBool(defval=True)
@@ -66,11 +60,8 @@ class SampleTable(DynoTable):
         modified = DynoAttrDateTime(current=True)
 
     class User(DynoSchema):
-        SchemaFieldValue = "user"
         Key = DynoKeyFormat(pk="account#user#", sk="accountid#{accountid}#user#{userid}")
-        GlobalIndexes = {
-            "gsi1": DynoKeyFormat(pk="user#", sk="email#{email}", req={"email"}),
-        }
+        Gsi1 = DynoKeyFormat(pk="user#", sk="email#{email}", req={"email"})
         accountid = DynoAttrUuid()
         userid = DynoAttrUuid()
         email = DynoAttrString()
@@ -88,6 +79,30 @@ DynoConnect.set_host()
 
 class TestDyno:
 
+    def test_metadata(self):
+        sn = SampleTable.Account.get_schema_name()
+        account = SampleTable.get_schema("Account")
+        schemaname = account.get_schema_name()
+        attributes = account.get_attributes(True)
+        account.get_autoincrement("foo")
+        x = account.get_globalindex("gsi1")
+        y = SampleTable.get_link(SampleTable.User, "gsi1")
+        assert True
+
+    def test_init_values(self):
+        data = {
+            "address": {
+                "addr1": "123 Main Street",
+                "city": "somewhere"
+            },
+            "color": "red",
+            "joe": "skip",
+            "modified": 1,
+        }
+        data = dict()
+        result = SampleTable.write_value(data, SampleTable.Account)
+        assert True
+
     def test_create_table(self) -> None:
         db = DynoConnect()
         dr = db.table_create(SampleTable)
@@ -100,12 +115,12 @@ class TestDyno:
         dr = db.table_delete(SampleTable)
         assert dr.ok
 
-    def test_autoinc(self) -> None:
+    def test_autoinc_value(self) -> None:
         db = DynoConnect()
-        value = db.auto_increment(dict(), SampleTable, "AutoIncrement", "next_accountid")
+        value = db.auto_increment(dict(), SampleTable, SampleTable.AutoIncrement, "next_accountid")
         assert isinstance(value, int)
 
-    def test_account(self) -> None:
+    def test_insert_account(self) -> None:
         db = DynoConnect()
         data_account = {
             "address": {
@@ -117,13 +132,13 @@ class TestDyno:
             "modified": 1,
         }
 
-        dr = db.insert(data_account, SampleTable, "Account")
+        dr = db.insert(data_account, SampleTable, SampleTable.Account)
         assert dr.ok
         accountid = dr.data.get('accountid')
-        dr = db.get_item(dr.data, SampleTable, "Account")
+        dr = db.get_item(dr.data, SampleTable, SampleTable.Account)
         assert dr.ok
 
-    def test_user(self) -> None:
+    def test_insert_user(self) -> None:
         db = DynoConnect()
         data_user = {
             "accountid": "AAABBBCCC",
@@ -133,33 +148,79 @@ class TestDyno:
             "joe": "skip",
             "modified": 1,
         }
-        dr = db.insert(data_user, SampleTable, "User")
+        dr = db.insert(data_user, SampleTable, SampleTable.User)
         assert dr.ok
         userid = dr.data.get('userid')
-        dr = db.get_item(dr.data, SampleTable, "User")
+        dr = db.get_item(dr.data, SampleTable, SampleTable.User)
         assert dr.ok
 
     def test_query_pk(self):
-        query = DynoQuery(SampleTable, "Account")
-        #query.FilterKey().pk("AAABBBCCC")
+        query = DynoQuery(SampleTable, SampleTable.Account)
+        # query.FilterKey().pk("AAABBBCCC")
 
-        #query.FilterKey().op(DynoOpEnum.eq, "sortkey#value")
-        #query.FilterExpression().op("accountid", "=", "AAABBBCCC")
-        #query.FilterGlobalIndex("gsi1").Contains("test_gsi1")
+        # query.FilterKey().op(DynoOpEnum.eq, "sortkey#value")
+        # query.FilterExpression().op("accountid", "=", "AAABBBCCC")
+        # query.FilterGlobalIndex("gsi1").Contains("test_gsi1")
 
         query.set_limit(5)
-        params = query.write()
-
-        # r = ddo.query(
-        #     TableName="primary",
-        #     ExpressionAttributeValues={":v1": {"S": "account#"}},
-        #     KeyConditionExpression="pk = :v1"
-        # )
+        params = query.build()
 
         db = DynoConnect()
         dr = db.query(query)
 
         if dr.LastEvaluatedKey:
             dr = db.query(query)
+
+        assert True
+
+    def test_update(self):
+        db = DynoConnect()
+        # dr = db.all(SampleTable, "Account", limit=5)
+        # row = dr.data[0]
+        # item = db.fetch(row['pk'], row['sk'], SampleTable, "Account")
+        item = {"accountid": "xsdd", "created": 11111}
+
+        item["address"] = {
+            "addr1": "456 Main Street",
+            "city": "smallville",
+            "zipcode": "90210",
+            "country": "US"
+        }
+        item['junk_field'] = 123
+        item['age'] = 45
+
+        update = DynoUpdate(SampleTable, SampleTable.Account)
+        update.apply_set(item)
+
+        params = update.build(item)
+
+        db.update(update)
+        assert True
+
+    def test_reader(self):
+        # db = DynoConnect()
+        # dr = db.all(SampleTable, "Account", limit=5)
+        # row = dr.data[0]
+        # item = db.fetch(row['pk'], row['sk'], SampleTable, "Account")
+        item = {"accountid": "xsdd", "created": 11111}
+
+        item["address"] = {
+            "addr1": "456 Main Street",
+            "city": "smallville",
+            "zipcode": "90210",
+            "country": "US"
+        }
+        item['junk_field'] = 123
+        item['age'] = 45
+
+        testdata = [
+            {"clothing": "shirt", "size": 12},
+            {"color": "red", "height": 24}
+        ]
+        valueA = DynoReader(item)
+        valueB = valueA.encode(SampleTable, SampleTable.Account)
+        valueC = valueA.decode(SampleTable, SampleTable.Account)
+        valueD = valueA.decode(SampleTable)
+        valueE = valueA.dataset
 
         assert True

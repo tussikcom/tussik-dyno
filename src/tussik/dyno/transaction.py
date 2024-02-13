@@ -1,7 +1,7 @@
 import logging
-from typing import Type, Dict, Any
+from typing import Dict, Any
 
-from tussik.dyno import DynoUpdate, DynoTable
+from tussik.dyno import DynoUpdate, DynoTable, DynoSchema
 from tussik.dyno.query import DynoQuery
 
 logger = logging.getLogger()
@@ -16,23 +16,24 @@ class DynoTransact:
     def append(self, call: dict):
         self._items.append(call)
 
-    def append_autoincrement(self, data: Dict[str, Any], table: Type[DynoTable], schema: str,
+    def append_autoincrement(self, data: Dict[str, Any], table: type[DynoTable], schema: type[DynoSchema],
                              name: str, reset: bool = False) -> bool:
         params = table.auto_increment(data, schema, name, reset)
-        self._items.append(params)
+        self._items.append(params) # TODO: complete param
         return True
 
     def append_query(self, query: DynoQuery) -> bool:
-        value = query.write()
+        value = query.build()
         if value is not None:
-            self._items.append(value)
+            self._items.append(value) # TODO: complete param
         return True
 
     def append_update(self, update: DynoUpdate) -> bool:
-        value = update.write()
+        value = update.build()
         if value is not None:
-            self._items.append(value)
+            self._items.append(value) # TODO: complete param
         return True
 
-    def write(self) -> list[dict]:
+    def build(self) -> list[dict]:
+        # TODO: complete params
         return self._items

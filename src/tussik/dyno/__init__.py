@@ -1,12 +1,13 @@
 import logging
 
-from .connects import DynoConnect, DynoResponse
 from .attributes import DynoAttrBase, DynoAttrBool, DynoAttrByteList, DynoAttrBytes, DynoAttribAutoIncrement
 from .attributes import DynoAttrDateTime, DynoEnum, DynoAttrFlag, DynoAttrFloat
 from .attributes import DynoAttrFloatList, DynoAttrInt, DynoAttrIntList, DynoAttrList
 from .attributes import DynoAttrIntEnum, DynoAttrStrEnum
 from .attributes import DynoAttrMap, DynoAttrString, DynoAttrStringList, DynoAttrUuid
+from .connects import DynoConnect, DynoResponse
 from .filtering import DynoFilter, DynoFilterKey, DynoOpEnum
+from .reading import DynoReader
 from .table import DynoGlobalIndex, DynoKey, DynoKeyFormat, DynoSchema, DynoTable, DynoTableLink
 from .update import DynoUpdate
 
@@ -23,6 +24,7 @@ __version__ = ""  # importlib_metadata.version(__name__)
 
 __all__ = [
     "__version__",
+    "DynoReader",
     "DynoConnect",
     "DynoOpEnum",
     "DynoFilter",
