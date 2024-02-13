@@ -19,7 +19,7 @@ ci: init
 
 clean:
 	@echo "Clean"
-	@rm -rf build dist tussik.zpl.egg-info src/tussik.zpl.egg-info
+	@rm -rf build dist tussik.dyno.egg-info src/tussik.dyno.egg-info
 
 build: clean init
 	@echo "*"
