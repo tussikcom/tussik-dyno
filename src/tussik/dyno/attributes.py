@@ -188,12 +188,12 @@ class DynoAttrDateTime(DynoAttrBase):
 
     def write_value(self, value: Any) -> Any:
         if self.current:
-            return str(int(datetime.datetime.utcnow().timestamp()))
+            return int(datetime.datetime.utcnow().timestamp())
         if isinstance(value, datetime.datetime):
-            return str(int(value.timestamp()))
+            return int(value.timestamp())
         if isinstance(value, (int, float)):
-            return str(int(value))
-        return str(int(datetime.datetime.utcnow().timestamp()))
+            return int(value)
+        return int(datetime.datetime.utcnow().timestamp())
 
     def write_encode(self, value: Any) -> Dict[str, Any]:
         if self.current:
@@ -240,7 +240,7 @@ class DynoAttrIntEnum(DynoAttrBase):
     def write_value(self, value: Any) -> Any:
         if value is None:
             if self.defval is not None:
-                return str(self.defval.value)
+                return int(self.defval.value)
             return None
 
         if not isinstance(value, self.enumclass):
@@ -580,7 +580,7 @@ class DynoAttrInt(DynoAttrBase):
     def write_value(self, value: Any) -> Any:
         if value is None:
             if self.defval is not None:
-                return str(self.defval)
+                return int(self.defval)
             return None
 
         if not isinstance(value, (int, float)):
@@ -596,7 +596,7 @@ class DynoAttrInt(DynoAttrBase):
         if self.le is not None and value > self.le:
             raise ValueError(f"DynoAttrInt.write: Value {value} must be less than or equal to {self.le}")
 
-        return str(value)
+        return int(value)
 
     def write_encode(self, value: Any) -> Dict[str, Any]:
         if value is None:
@@ -645,7 +645,7 @@ class DynoAttrFloat(DynoAttrBase):
     def write_value(self, value: Any) -> Any:
         if value is None:
             if self.defval is not None:
-                return str(self.defval)
+                return float(self.defval)
             return None
 
         if not isinstance(value, (int, float)):
@@ -661,7 +661,7 @@ class DynoAttrFloat(DynoAttrBase):
         if self.le is not None and value > self.le:
             raise ValueError(f"DynoAttrFloat.write: Value {value} must be less than or equal to {self.le}")
 
-        return str(value)
+        return float(value)
 
     def write_encode(self, value: Any) -> Dict[str, Any]:
         if value is None:

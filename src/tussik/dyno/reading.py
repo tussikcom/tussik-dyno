@@ -199,7 +199,9 @@ class DynoReader:
                 value = self._encode_dict(allowlist, item, new_prefix)
                 dataset[name] = {dt.value: value}
             elif item is None:
-                dataset[name] = {DynoEnum.Null: True}
+                dataset[name] = {DynoEnum.Null.value: True}
+            elif dt.value == DynoEnum.Number:
+                dataset[name] = {dt.value: str(item)}
             else:
                 dataset[name] = {dt.value: item}
         return dataset

@@ -145,7 +145,7 @@ class DynoConnect:
                 dr.set_error(500, f"DynoConnect.insert: invalid data parameter")
                 return dr
 
-            dr.data = table.write_value(data, schema)
+            dr.data = table.write_value(data, schema, include_readonly=True)
             reader = DynoReader(dr.data)
             item = reader.encode(table, schema)
 
