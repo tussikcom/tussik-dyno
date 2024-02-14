@@ -219,7 +219,7 @@ class DynoAttrIntEnum(DynoAttrBase):
     __slots__ = ["enumclass", "defval"]
     code: str = DynoEnum.Number.value
 
-    def __init__(self, enumclass: Type[Enum], defval: Enum,
+    def __init__(self, enumclass: Type[Enum], defval: None | Enum = None,
                  always: None | bool = None, readonly: None | bool = None):
         super().__init__(always, readonly)
         self.enumclass = enumclass
@@ -272,7 +272,7 @@ class DynoAttrStrEnum(DynoAttrBase):
     __slots__ = ["enumclass", "defval"]
     code: str = DynoEnum.String.value
 
-    def __init__(self, enumclass: Type[Enum], defval: Enum,
+    def __init__(self, enumclass: Type[Enum], defval: None | Enum = None,
                  always: None | bool = None, readonly: None | bool = None):
         super().__init__(always, readonly)
         self.enumclass = enumclass
