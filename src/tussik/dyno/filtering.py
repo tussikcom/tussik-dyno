@@ -297,6 +297,11 @@ class DynoFilterKey:
     def is_empty(self) -> bool:
         return len(self._stack) == 0 and self._pk_value is None
 
+    @property
+    def pk(self) -> Any:
+        return self._pk_value
+
+    @pk.setter
     def pk(self, value: Any):
         if isinstance(value, (str, int, float, bytes)):
             self._pk_value = value

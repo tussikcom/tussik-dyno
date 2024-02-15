@@ -312,18 +312,8 @@ class DynoConnect:
               table: type[DynoTable], schema: type[DynoSchema], globalindex: None | str = None) -> None | dict:
         query = DynoQuery(table, schema, globalindex)
         query.set_limit(1)
-
-        if isinstance(globalindex, str):
-            key = table.get_globalindex(schema.get_schema_name())
-        else:
-            key = table.Key
-            query.FilterKey().pk(pk)
-            query.FilterKey().op("=", sk)
-
-        if key is None:
-            dr = DynoResponse()
-            dr.set_error(404, f"DynoConnect.fetch({table.TableName}.{schema}) not found")
-            return None
+        query.Key.pk = pk
+        query.Key.op("=", sk)
 
         dr = self.query(query)
         if len(dr.data) > 0:
@@ -346,7 +336,7 @@ class DynoConnect:
                 dr.errors.append(f"Failed to query {query.TableName}")
 
             if "LastEvaluatedKey" in r:
-                query.StartKey(dr.LastEvaluatedKey)
+                query.set_startkey(dr.LastEvaluatedKey)
 
         except Exception as e:
             logger.exception(f"DynoConnect.query({query.TableName}) {e!r}")

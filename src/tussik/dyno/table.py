@@ -1,6 +1,6 @@
 import inspect
 import logging
-from typing import Set, Any, Dict, Type, Optional
+from typing import Set, Any, Dict, Type, Optional, List
 
 from .attributes import DynoEnum, DynoAttrBase, DynoAttribAutoIncrement, DynoAttrMap, DynoAttrList
 
@@ -26,8 +26,8 @@ class DynoTableLink:
 
     def __init__(self,
                  table: type["DynoTable"],
-                 schema: type["DynoSchema"] = None,
-                 globalindex: None | type['DynoGlobalIndex'] = None):
+                 schema: type["DynoSchema"] | None = None,
+                 globalindex: type['DynoGlobalIndex'] | None = None):
         self.table = table
         self.schema = schema
         self.globalindex = globalindex
@@ -37,19 +37,35 @@ class DynoTableLink:
 
 
 class DynoKey:
-    __slots__ = ["pk", "sk", "pk_type", "sk_type"]
+    __slots__ = ["_pk", "_sk", "_pk_type", "_sk_type"]
 
     def __init__(self,
                  pk: None | str = None, sk: None | str = None,
                  pk_type: None | DynoEnum = None, sk_type: None | DynoEnum = None
                  ):
-        self.pk: str = pk or "pk"
-        self.sk: str = sk or "sk"
-        self.pk_type: DynoEnum = pk_type or DynoEnum.String
-        self.sk_type: DynoEnum = sk_type or DynoEnum.String
+        self._pk: str = pk or "pk"
+        self._sk: str = sk or "sk"
+        self._pk_type: DynoEnum = pk_type or DynoEnum.String
+        self._sk_type: DynoEnum = sk_type or DynoEnum.String
+
+    @property
+    def pk(self) -> str:
+        return self._pk
+
+    @property
+    def sk(self) -> str:
+        return self._sk
+
+    @property
+    def pk_type(self) -> DynoEnum:
+        return self._pk_type
+
+    @property
+    def sk_type(self) -> DynoEnum:
+        return self._sk_type
 
     def __repr__(self):
-        return f"DynoKey: {self.pk}, {self.sk}"
+        return f"DynoKey: {self._pk}, {self._sk}"
 
 
 class DynoKeyFormat:
@@ -93,26 +109,94 @@ class DynoKeyFormat:
         return None
 
 
+class DynoGlobalIndexFormat:
+    __slots__ = ["name", "pk", "sk", "req"]
+
+    def __init__(self, name: str, pk: None | str = None, sk: None | str = None, req: None | Set[str] = None):
+        self.name = name
+        self.pk: str = pk
+        self.sk: str = sk
+        self.req: Set[str] = req or set[str]()
+
+    def __repr__(self):
+        return f"DynoGlobalIndexFormat.{self.name}: pk={self.pk}, sk={self.sk}, req={' '.join(self.req)}"
+
+    def write(self, key: DynoKey, values: None | Dict[str, Any]) -> None | Dict[str, Dict[str, Any]]:
+        pval = self.format_pk(values)
+        if pval is None:
+            return None
+        sval = self.format_sk(values)
+        if sval is None:
+            return None
+        results = {
+            key.pk: {key.pk_type.value: pval},
+            key.sk: {key.sk_type.value: sval},
+        }
+        return results
+
+    def format_pk(self, values: None | Dict[str, Any] = None) -> None | str:
+        if self.pk is not None:
+            try:
+                return self.pk.format(**(values or dict()))
+            except Exception as e:
+                pass
+        return None
+
+    def format_sk(self, values: None | Dict[str, Any] = None) -> None | str:
+        if self.sk is not None:
+            try:
+                return self.sk.format(**(values or dict()))
+            except Exception as e:
+                pass
+        return None
+
+
 class DynoGlobalIndex:
-    __slots__ = ["pk", "sk", "pk_type", "sk_type", "read_unit", "write_unit", "unique"]
+    __slots__ = ["_name", "_pk", "_sk", "_pk_type", "_sk_type", "read_unit", "write_unit", "unique"]
 
     def __init__(self,
+                 name: str,
                  pk: None | str = None, sk: None | str = None,
                  pk_type: None | DynoEnum = None, sk_type: None | DynoEnum = None,
                  read_unit: None | int = None, write_unit: None | int = None,
                  unique: None | bool = None
                  ):
-        self.pk: str = pk or "pk"
-        self.sk: str = sk or "sk"
-        self.pk_type: DynoEnum = pk_type or DynoEnum.String
-        self.sk_type: DynoEnum = sk_type or DynoEnum.String
+        self._name = name
+        self._pk: str = pk or f"{self._name}_pk"
+        self._sk: str = sk or f"{self._name}_sk"
+        self._pk_type: DynoEnum = pk_type or DynoEnum.String
+        self._sk_type: DynoEnum = sk_type or DynoEnum.String
         self.read_unit: int = read_unit or 1
         self.write_unit: int = write_unit or 1
         self.unique: bool = unique or True
 
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def pk(self) -> str:
+        return self._pk
+
+    @property
+    def sk(self) -> str:
+        return self._sk
+
+    @property
+    def pk_type(self) -> DynoEnum:
+        return self._pk_type
+
+    @property
+    def sk_type(self) -> DynoEnum:
+        return self._sk_type
+
+    def __repr__(self):
+        return f"DynoGlobalIndex.{self._name}: {self._pk}, {self._sk}"
+
 
 class DynoSchema(metaclass=DynoMeta):
     Key: DynoKeyFormat = ...
+    Indexes: List[DynoGlobalIndexFormat] = list[DynoGlobalIndexFormat]()
 
     @classmethod
     def _class_repr(cls):
@@ -127,20 +211,18 @@ class DynoSchema(metaclass=DynoMeta):
         return cls.__name__
 
     @classmethod
-    def get_globalindexes(cls) -> Dict[str, DynoKeyFormat]:
-        results = dict[str, DynoKeyFormat]()
-        for name, cls_attr in cls.__dict__.items():
-            if name != "Key" and isinstance(cls_attr, DynoKeyFormat):
-                results[name] = cls_attr
+    def get_globalindexes(cls) -> Dict[str, DynoGlobalIndexFormat]:
+        results = dict[str, DynoGlobalIndexFormat]()
+        for item in cls.Indexes:
+            if isinstance(item, DynoGlobalIndexFormat):
+                results[item.name] = item
         return results
 
     @classmethod
-    def get_globalindex(cls, name: str) -> None | DynoKeyFormat:
-        if name == "Key":
-            return None
-        for key, cls_attr in cls.__dict__.items():
-            if key == name and isinstance(cls_attr, DynoKeyFormat):
-                return cls_attr
+    def get_globalindex(cls, name: str) -> None | DynoGlobalIndexFormat:
+        for item in cls.Indexes:
+            if isinstance(item, DynoGlobalIndexFormat) and item.name == name:
+                return item
         return None
 
     @classmethod
@@ -186,13 +268,61 @@ class DynoAllow:
 
 class DynoTable(metaclass=DynoMeta):
     TableName: str = ...
-    SchemaFieldName: None | str = None
+    SchemaFieldName: None | str = "schema"
     Key: DynoKey = ...
+    Indexes: List[DynoGlobalIndex] = list[DynoGlobalIndex]()
     DeletionProtection = True
     TableClassStandard = True
     PayPerRequest = True
     ReadCapacityUnits: int = 1
     WriteCapacityUnits: int = 1
+
+    @classmethod
+    def isvalid(cls) -> bool:
+        if not isinstance(cls.Key, DynoKey) or cls.Key.pk is None or cls.Key.sk is None:
+            raise ValueError(f"Table key is invalid")
+
+        key_list = list[str]()
+        key_list.append(cls.Key.pk)
+        if cls.Key.sk in key_list:
+            raise ValueError(f"Table key sk must be unique")
+
+        gsi_list = list[str]()
+        for gsi in cls.Indexes:
+            if not isinstance(gsi, DynoGlobalIndex):
+                raise ValueError(f"Table global index {gsi.name} item is invalid")
+            if gsi.name in gsi_list:
+                raise ValueError(f"Table global index {gsi.name} name must be unique")
+
+            if gsi.pk in key_list:
+                raise ValueError(f"Table global index {gsi.name} pk must be unique")
+            if gsi.sk in key_list:
+                raise ValueError(f"Table global index {gsi.name} sk must be unique")
+
+            gsi_list.append(gsi.name)
+
+        if not isinstance(cls.TableName, str) or len(cls.TableName) == 0:
+            raise ValueError(f"Table table name is required")
+
+        schema_list = list[str]()
+        for name, item in cls.get_schemas().items():
+            if not issubclass(item, DynoSchema):
+                raise ValueError(f"Table schema {name} is invalid")
+            if name in schema_list:
+                raise ValueError(f"Table schema {name} must be unique")
+
+            if not isinstance(item.Key, DynoKeyFormat) or item.Key.pk is None or item.Key.sk is None:
+                raise ValueError(f"Table schema {name} key is invalid")
+
+            for gsi in item.Indexes:
+                if not isinstance(gsi, DynoGlobalIndexFormat):
+                    raise ValueError(f"Table schema {name} global index is invalid")
+                if gsi.name not in gsi_list:
+                    raise ValueError(f"Table schema {name} global index {gsi.name} is unknown")
+
+            schema_list.append(name)
+
+        return True
 
     @classmethod
     def _class_repr(cls):
@@ -203,7 +333,7 @@ class DynoTable(metaclass=DynoMeta):
         return cls.TableName
 
     @classmethod
-    def get_link(cls, schema: type[DynoSchema] = None, globalindex: None | str = None) -> DynoTableLink:
+    def get_link(cls, schema: type[DynoSchema] | None = None, globalindex: None | str = None) -> DynoTableLink:
         return DynoTableLink(cls, schema, globalindex)
 
     @classmethod
@@ -322,16 +452,16 @@ class DynoTable(metaclass=DynoMeta):
     @classmethod
     def get_globalindexes(cls) -> Dict[str, DynoGlobalIndex]:
         indexes = dict[str, DynoGlobalIndex]()
-        for name, cls_attr in cls.__dict__.items():
-            if isinstance(cls_attr, DynoGlobalIndex):
-                indexes[name] = cls_attr
+        for item in cls.Indexes:
+            if isinstance(item, DynoGlobalIndex):
+                indexes[item.name] = item
         return indexes
 
     @classmethod
     def get_globalindex(cls, name: str) -> None | DynoGlobalIndex:
-        for key, cls_attr in cls.__dict__.items():
-            if name == key and isinstance(cls_attr, DynoGlobalIndex):
-                return cls_attr
+        for item in cls.Indexes:
+            if isinstance(item, DynoGlobalIndex) and item.name == name:
+                return item
         return None
 
     @classmethod

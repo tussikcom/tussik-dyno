@@ -1,6 +1,6 @@
 import logging
-from enum import Enum
-from typing import Set, Any, Dict, Type, Self
+from enum import Enum, StrEnum
+from typing import Set, Any, Dict, Self
 
 from .filtering import DynoFilter, DynoFilterKey, DynoFilterState
 from .table import DynoTable, DynoTableLink, DynoSchema
@@ -15,6 +15,26 @@ class DynoQuerySelectEnum(Enum):
     count = "COUNT"
 
 
+class DynoQueryOperator(StrEnum):
+    eq = "="
+    ne = "<>"
+    gt = ">"
+    lt = "<"
+    ge = ">="
+    le = "<="
+    contains = "contains"
+    not_contains = "not_contains"
+    begins_with = "begins_with"
+    exists = "exists"
+    not_exists = "not_exists"
+
+    @classmethod
+    def write(cls, value: str | Self) -> str:
+        if isinstance(value, str):
+            value = DynoQueryOperator(value)
+        return str(value.value)
+
+
 class DynoQuery:
     __slots__ = [
         "_schema_obj", "_key_obj", "_key_fmt", "_key", "_consistent",
@@ -22,7 +42,13 @@ class DynoQuery:
         "_filter", "_filter_key", "_filter_key_globalindex", "_start_key"
     ]
 
-    def __init__(self, table: type[DynoTable], schema: type[DynoSchema], globalindex: None | str = None):
+    def __init__(self, table: type[DynoTable], schema: type[DynoSchema] | None = None, globalindex: None | str = None):
+        if isinstance(globalindex, str):
+            if table.get_globalindex(globalindex) is None:
+                globalindex = None
+            elif schema is not None and table.get_globalindex(globalindex) is None:
+                globalindex = None
+
         self._link = table.get_link(schema, globalindex)
 
         self._key: None | dict = None
@@ -53,13 +79,24 @@ class DynoQuery:
             self._key_obj = None
             self._key_fmt = None
 
-        self._filter_key.pk(self._schema_obj.Key.format_pk(dict()))
+        self._filter_key.pk = self._schema_obj.Key.format_pk(dict())
         for name, gsi in self._schema_obj.get_globalindexes().items():
-            self._filter_key_globalindex[name].pk(gsi.format_pk(dict()))
+            self._filter_key_globalindex[name].pk = gsi.format_pk(dict())
 
     @property
     def TableName(self) -> str:
         return self._link.table.TableName
+
+    @property
+    def Key(self) -> None | DynoFilterKey:
+        if isinstance(self._link.globalindex, str):
+            return self._filter_key_globalindex.get(self._link.globalindex)
+        else:
+            return self._filter_key
+
+    @property
+    def Attrib(self) -> DynoFilter:
+        return self._filter
 
     def get_link(self) -> DynoTableLink:
         return self._link
@@ -83,10 +120,7 @@ class DynoQuery:
         for name in names:
             self._select_attributes.add(name)
 
-    def FilterExpression(self) -> DynoFilter:
-        return self._filter
-
-    def StartKey(self, startkey: None | Dict[str, Dict[str, Any]]) -> Self:
+    def set_startkey(self, startkey: None | Dict[str, Dict[str, Any]]) -> Self:
         self._start_key = dict()
 
         if isinstance(startkey, dict):
@@ -102,12 +136,6 @@ class DynoQuery:
         if len(self._start_key) == 0:
             self._start_key = None
         return self
-
-    def FilterKey(self) -> DynoFilterKey:
-        return self._filter_key
-
-    def FilterGlobalIndex(self, globalindex: str) -> None | DynoFilterKey:
-        return self._filter_key_globalindex.get(globalindex)
 
     def build(self) -> None | Dict[str, Any]:
         params = dict()

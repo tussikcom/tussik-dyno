@@ -4,6 +4,7 @@ from enum import Enum
 from tussik.dyno import *
 from tussik.dyno.attributes import DynoAttribAutoIncrement
 from tussik.dyno.query import DynoQuery
+from tussik.dyno.table import DynoGlobalIndexFormat
 
 
 class SampleAddress(DynoAttrMap):
@@ -40,8 +41,10 @@ class SampleTable(DynoTable):
     WriteCapacityUnits: int = 1
 
     Key = DynoKey("pk", "sk")
-    Gsi1 = DynoGlobalIndex("gsi1_pk", "gsi1_sk", read_unit=1, write_unit=1)
-    Gsi2 = DynoGlobalIndex("gsi2_pk", "gsi2_sk")
+    Indexes = [
+        DynoGlobalIndex("gsi1", read_unit=1, write_unit=1),
+        DynoGlobalIndex("gsi2")
+    ]
 
     class AutoIncrement(DynoSchema):
         Key = DynoKeyFormat(pk="autoincrement#", sk="autoincrement#")
@@ -50,7 +53,7 @@ class SampleTable(DynoTable):
 
     class Account(DynoSchema):
         Key = DynoKeyFormat(pk="account#", sk="accountid#{accountid}", req={"accountid"})
-        Gsi1 = DynoKeyFormat(pk="account#", sk="alias#{alias}", req={"alias"})
+        Indexes = [DynoGlobalIndexFormat("gsi2", pk="account#", sk="alias#{alias}", req={"alias"})]
         accountid = DynoAttrUuid()
         next_userid = DynoAttribAutoIncrement()
         active = DynoAttrBool(defval=True)
@@ -61,7 +64,7 @@ class SampleTable(DynoTable):
 
     class User(DynoSchema):
         Key = DynoKeyFormat(pk="account#user#", sk="accountid#{accountid}#user#{userid}")
-        Gsi1 = DynoKeyFormat(pk="user#", sk="email#{email}", req={"email"})
+        Indexes = [DynoGlobalIndexFormat("gsi1", pk="user#", sk="email#{email}", req={"email"})]
         accountid = DynoAttrUuid()
         userid = DynoAttrUuid()
         email = DynoAttrString()
@@ -73,6 +76,8 @@ class SampleTable(DynoTable):
         pet = DynoAttrStrEnum(SamplePetEnum, SamplePetEnum.Cat)
         status = DynoAttrIntEnum(SampleStatusEnum, SampleStatusEnum.Two)
 
+
+SampleTable.isvalid()
 
 DynoConnect.set_host()
 
@@ -154,8 +159,23 @@ class TestDyno:
         dr = db.get_item(dr.data, SampleTable, SampleTable.User)
         assert dr.ok
 
+    def test_query_one(self):
+        query = DynoQuery(SampleTable, SampleTable.User)
+        userid = '286e456d410c4ffdb6d0d52273a68eab'
+        query.Key.pk = "user#"
+        query.Key.op("=", f"user#{userid}")
+        params = query.build()
+        db = DynoConnect()
+        dr = db.query(query)
+        assert True
+
     def test_query_pk(self):
-        query = DynoQuery(SampleTable, SampleTable.Account)
+        query = DynoQuery(SampleTable, SampleTable.Account, "Gsi1")
+
+        query.Key.pk = "user#"
+        query.Key.op(DynoOpEnum.eq, "user#1234")
+        query.Attrib.op("email", DynoOpEnum.eq, "user@tld.com")
+
         # query.FilterKey().pk("AAABBBCCC")
 
         # query.FilterKey().op(DynoOpEnum.eq, "sortkey#value")
