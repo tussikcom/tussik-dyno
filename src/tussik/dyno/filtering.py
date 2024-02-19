@@ -1,6 +1,7 @@
+import copy
 import logging
 from enum import Enum
-from typing import Any, Self, List
+from typing import Self
 
 from .attributes import DynoEnum
 from .table import DynoKey, DynoGlobalIndex
@@ -23,26 +24,41 @@ class DynoOpEnum(str, Enum):
         return str(value.value)
 
 
-class DynoFilterState:
-    __slots__ = ["_names", "_values", "_count_name", "_count_value"]
+class DynoAttributeState:
+    __slots__ = ["_names", "_values", "_count_name", "_count_value", "_value_context"]
 
-    def __init__(self):
-        self._count_name = 0
-        self._count_value = 0
-        self._names = dict[str, str]()
-        self._values = dict[str, dict[str, Any]]()
+    def __init__(self, state: Self | None = None):
+        if isinstance(state, DynoAttributeState):
+            self._count_name = state._count_name
+            self._count_value = state._count_value
+            self._names = copy.deepcopy(state._names)
+            self._values = copy.deepcopy(state._values)
+            self._value_context = copy.deepcopy(state._value_context)
+        else:
+            self._count_name = 0
+            self._count_value = 0
+            self._names = dict[str, str]()
+            self._values = dict[str, dict[str, any]]()
+            self._value_context = dict[str, str]()
 
     def __repr__(self):
-        return f"DynoFilterState with {self._count_name} names, and {self._count_value} values"
+        return f"DynoAttributeState with {self._count_name} names, and {self._count_value} values"
 
     def write(self) -> dict[str, dict]:
         params = dict[str, dict]()
         names = dict[str, str]()
         for name, alias in self._names.items():
             names[alias] = name
-        params['ExpressionAttributeNames'] = names
-        params['ExpressionAttributeValues'] = self._values
+
+        if len(names) > 0:
+            params['ExpressionAttributeNames'] = names
+
+        if len(self._values) > 0:
+            params['ExpressionAttributeValues'] = self._values
         return params
+
+    def name_exists(self, name: str) -> bool:
+        return name in self._names
 
     def alias(self, name: str) -> str:
         if name not in self._names:
@@ -50,49 +66,90 @@ class DynoFilterState:
             self._names[name] = f"#n{self._count_name}"
         return self._names[name]
 
-    def add(self, value: Any) -> str:
+    def _add_value(self, value: any, alias: str):
         if isinstance(value, str):
-            self._count_value += 1
-            alias = f":v{self._count_value}"
-            self._values[alias] = {DynoEnum.String.value: value}
-            return alias
-
-        if isinstance(value, (int, float)):
-            self._count_value += 1
-            alias = f":v{self._count_value}"
-            self._values[alias] = {DynoEnum.Null.value: str(value)}
+            if alias in self._values:
+                existing = self._values[alias]
+                key = next(iter(existing))
+                val = existing[key]
+                if isinstance(val, list):
+                    val.append(value)
+                else:
+                    val = [val, value]
+                self._values[alias] = {DynoEnum.StringList.value: val}
+            else:
+                self._values[alias] = {DynoEnum.String.value: value}
             return alias
 
         if isinstance(value, bool):
-            self._count_value += 1
-            alias = f":v{self._count_value}"
             self._values[alias] = {DynoEnum.Boolean.value: value}
             return alias
 
+        if isinstance(value, (int, float)):
+            if alias in self._values:
+                existing = self._values[alias]
+                key = next(iter(existing))
+                val = existing[key]
+                if isinstance(val, list):
+                    val.append(value)
+                else:
+                    val = [value, val]
+                self._values[alias] = {DynoEnum.NumberList.value: val}
+            else:
+                self._values[alias] = {DynoEnum.Number.value: str(value)}
+            return alias
+
         if isinstance(value, bytes):
-            self._count_value += 1
-            alias = f":v{self._count_value}"
             self._values[alias] = {DynoEnum.Bytes.value: value}
             return alias
 
         if isinstance(value, list):
-            if isinstance(value[0], (int, float, str)):
-                self._count_value += 1
-                alias = f":v{self._count_value}"
-                revalue = [str(x) for x in value if isinstance(x, (int, float, str))]
+            if isinstance(value[0], str):
+                revalue = [str(x) for x in value if isinstance(x, str)]
+                if alias in self._values:
+                    existing = self._values[alias]
+                    key = next(iter(existing))
+                    val = existing[key]
+                    revalue += val
+                self._values[alias] = {DynoEnum.StringList.value: revalue}
+                return alias
+
+            if isinstance(value[0], (int, float)):
+                revalue = [str(x) for x in value if isinstance(x, (int, float))]
+                if alias in self._values:
+                    existing = self._values[alias]
+                    key = next(iter(existing))
+                    val = existing[key]
+                    revalue += val
                 self._values[alias] = {DynoEnum.StringList.value: revalue}
                 return alias
 
             if isinstance(value[0], bytes):
-                self._count_value += 1
-                alias = f":v{self._count_value}"
                 revalue = [x for x in value if isinstance(x, bytes)]
+                if alias in self._values:
+                    existing = self._values[alias]
+                    key = next(iter(existing))
+                    val = existing[key]
+                    revalue += val
                 self._values[alias] = {DynoEnum.NumberList.value: revalue}
                 return alias
 
-        self._count_value += 1
-        alias = f":v{self._count_value}"
         self._values[alias] = {DynoEnum.Null.value: True}
+
+    def add(self, value: any, name: None | str = None) -> str:
+        alias = None
+
+        if isinstance(name, str):
+            alias = self._value_context.get(name)
+
+        if not isinstance(alias, str):
+            self._count_value += 1
+            alias = f":v{self._count_value}"
+
+        if isinstance(name, str):
+            self._value_context[name] = alias
+
+        self._add_value(value, alias)
         return alias
 
 
@@ -108,7 +165,7 @@ class DynoFilter:
     def is_empty(self) -> bool:
         return len(self._stack) == 0
 
-    def write(self, state: DynoFilterState) -> str:
+    def write(self, state: DynoAttributeState) -> str:
         statement = list[str]()
 
         for item in self._stack:
@@ -162,7 +219,7 @@ class DynoFilter:
     def reset(self):
         self._stack = list()
 
-    def op(self, attr: str, op: str | DynoOpEnum, value: Any) -> Self:
+    def op(self, attr: str, op: str | DynoOpEnum, value: any) -> Self:
 
         self._stack.append({
             "type": "value",
@@ -172,7 +229,7 @@ class DynoFilter:
         })
         return self
 
-    def op_in(self, attr: str, value: list[Any]) -> Self:
+    def op_in(self, attr: str, value: list[any]) -> Self:
         self._stack.append({
             "type": "in",
             "attr": attr,
@@ -181,7 +238,7 @@ class DynoFilter:
         })
         return self
 
-    def op_between(self, attr: str, value1: Any, value2: Any) -> Self:
+    def op_between(self, attr: str, value1: any, value2: any) -> Self:
         self._stack.append({
             "type": "between",
             "attr": attr,
@@ -230,7 +287,7 @@ class DynoFilter:
         })
         return self
 
-    def Exists(self, path: str | List[str]) -> Self:
+    def Exists(self, path: str | list[str]) -> Self:
         self._stack.append({
             "type": "function",
             "path": path if isinstance(path, list) else [path],
@@ -238,7 +295,7 @@ class DynoFilter:
         })
         return self
 
-    def NotExist(self, path: str | List[str]) -> Self:
+    def NotExist(self, path: str | list[str]) -> Self:
         self._stack.append({
             "type": "function",
             "path": path if isinstance(path, list) else [path],
@@ -246,7 +303,7 @@ class DynoFilter:
         })
         return self
 
-    def AttrType(self, path: str | List[str], datatype: DynoEnum) -> Self:
+    def AttrType(self, path: str | list[str], datatype: DynoEnum) -> Self:
         self._stack.append({
             "type": "function",
             "path": path if isinstance(path, list) else [path],
@@ -255,7 +312,7 @@ class DynoFilter:
         })
         return self
 
-    def StartsWith(self, path: str | List[str], value: Any) -> Self:
+    def StartsWith(self, path: str | list[str], value: any) -> Self:
         self._stack.append({
             "type": "function",
             "path": path if isinstance(path, list) else [path],
@@ -264,7 +321,7 @@ class DynoFilter:
         })
         return self
 
-    def Contains(self, path: str | List[str], value: Any) -> Self:
+    def Contains(self, path: str | list[str], value: any) -> Self:
         self._stack.append({
             "type": "function",
             "path": path if isinstance(path, list) else [path],
@@ -273,7 +330,7 @@ class DynoFilter:
         })
         return self
 
-    def AttrSize(self, path: str | List[str], value: Any, op: str | DynoOpEnum = DynoOpEnum.eq) -> Self:
+    def AttrSize(self, path: str | list[str], value: any, op: str | DynoOpEnum = DynoOpEnum.eq) -> Self:
         self._stack.append({
             "type": "function",
             "path": path if isinstance(path, list) else [path],
@@ -298,17 +355,17 @@ class DynoFilterKey:
         return len(self._stack) == 0 and self._pk_value is None
 
     @property
-    def pk(self) -> Any:
+    def pk(self) -> any:
         return self._pk_value
 
     @pk.setter
-    def pk(self, value: Any):
+    def pk(self, value: any):
         if isinstance(value, (str, int, float, bytes)):
             self._pk_value = value
         else:
             self._pk_value = None
 
-    def write(self, key: DynoKey | DynoGlobalIndex, state: DynoFilterState) -> None | str:
+    def write(self, key: DynoKey | DynoGlobalIndex, state: DynoAttributeState) -> None | str:
         statement = list[str]()
 
         if self._pk_value is not None:
@@ -368,7 +425,7 @@ class DynoFilterKey:
     def reset(self):
         self._stack = list()
 
-    def op(self, op: str | DynoOpEnum, value: Any) -> Self:
+    def op(self, op: str | DynoOpEnum, value: any) -> Self:
         self._stack.append({
             "type": "value",
             "op": DynoOpEnum.write(op),
@@ -376,7 +433,7 @@ class DynoFilterKey:
         })
         return self
 
-    def op_in(self, value: list[Any]) -> Self:
+    def op_in(self, value: list[any]) -> Self:
         self._stack.append({
             "type": "in",
             "op": "IN",
@@ -384,7 +441,7 @@ class DynoFilterKey:
         })
         return self
 
-    def op_between(self, value1: Any, value2: Any) -> Self:
+    def op_between(self, value1: any, value2: any) -> Self:
         self._stack.append({
             "type": "between",
             "op": "BETWEEN",
@@ -432,7 +489,7 @@ class DynoFilterKey:
         })
         return self
 
-    def StartsWith(self, value: Any) -> Self:
+    def StartsWith(self, value: any) -> Self:
         self._stack.append({
             "type": "function",
             "value": value,
@@ -440,7 +497,7 @@ class DynoFilterKey:
         })
         return self
 
-    def Contains(self, value: Any) -> Self:
+    def Contains(self, value: any) -> Self:
         self._stack.append({
             "type": "function",
             "value": value,
@@ -448,7 +505,7 @@ class DynoFilterKey:
         })
         return self
 
-    def AttrSize(self, value: Any, op: DynoOpEnum = DynoOpEnum.eq) -> Self:
+    def AttrSize(self, value: any, op: DynoOpEnum = DynoOpEnum.eq) -> Self:
         self._stack.append({
             "type": "function",
             "comparator": DynoOpEnum.write(op),

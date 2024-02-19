@@ -1,5 +1,5 @@
+import copy
 import logging
-from typing import Any, Type, Dict
 
 import boto3
 
@@ -22,9 +22,9 @@ class DynoResponse:
         self.scanned = 0
         self.errors = list[str]()
         self.consumed = 0.0
-        self.data: Any = None
+        self.data: any = None
         self.attributes = dict()
-        self.LastEvaluatedKey: None | Dict[str, Dict[str, Any]] = None
+        self.LastEvaluatedKey: None | dict[str, dict[str, any]] = None
 
     def set_error(self, code: int, message: str) -> None:
         self.ok = False
@@ -138,7 +138,68 @@ class DynoConnect:
         ddb = boto3.resource('dynamodb', **params)
         return ddb
 
-    def insert(self, data: dict[str, Any], table: type[DynoTable], schema: type[DynoSchema]) -> DynoResponse:
+    def put_item(self, data: dict[str, any],
+                 table: type[DynoTable],
+                 schema: type[DynoSchema],
+                 enforce_gsi: bool | None = None,
+                 ignore_gsi: bool | None = None) -> DynoResponse:
+        dr = DynoResponse()
+        try:
+            if not isinstance(data, dict):
+                dr.set_error(500, f"DynoConnect.put_item: invalid data parameter")
+                return dr
+
+            dataset = copy.deepcopy(data)
+            ignore_gsi = ignore_gsi if isinstance(ignore_gsi, bool) else False
+            if ignore_gsi:
+                for name, gsi in table.get_globalindexes().items():
+                    if gsi.pk in dataset:
+                        del dataset[gsi.pk]
+                    if gsi.sk in dataset:
+                        del dataset[gsi.sk]
+
+            dr.data = table.write_value(dataset, schema, include_readonly=True)
+            reader = DynoReader(dr.data)
+            item = reader.encode(table, schema)
+
+            cond_list = list[str]()
+            cond_list.append(f"attribute_exists({table.Key.pk})")
+            cond_list.append(f"attribute_exists({table.Key.sk})")
+
+            # enforce gsi uniqueness when enabled
+            enforce_gsi = enforce_gsi if isinstance(enforce_gsi, bool) else True
+            if enforce_gsi and not ignore_gsi:
+                for name, gsi in table.get_globalindexes().items():
+                    if gsi.unique and gsi.pk in item:
+                        cond_list.append(f"attribute_not_exists({gsi.pk})")
+                    if gsi.unique and gsi.sk in item:
+                        cond_list.append(f"attribute_not_exists({gsi.sk})")
+
+            condition = " AND ".join(cond_list)
+
+            db = self.client()
+            r = db.put_item(
+                TableName=table.TableName,
+                Item=item,
+                ConditionExpression=condition,
+                ReturnConsumedCapacity="INDEXES",
+                ReturnItemCollectionMetrics="SIZE",
+            )
+            link = table.get_link(schema)
+            dr.set_response(r, link)
+            if dr.code != 200:
+                logger.error(f"DynoConnect.put_item({table}[{schema}])")
+                dr.set_error(dr.code, f"Failed to put_item {table}[{schema}")
+        except Exception as e:
+            if type(e).__name__ == "ConditionalCheckFailedException":
+                dr.set_error(400, f"Global Index must be unique")
+                dr.errors.append(f"{e!r}")
+            else:
+                logger.exception(f"DynoConnect.put_item({table}[{schema}])")
+                dr.set_error(500, f"{e!r}")
+        return dr
+
+    def insert(self, data: dict[str, any], table: type[DynoTable], schema: type[DynoSchema]) -> DynoResponse:
         dr = DynoResponse()
         try:
             if not isinstance(data, dict):
@@ -174,8 +235,12 @@ class DynoConnect:
                 logger.error(f"DynoConnect.insert({table}[{schema}])")
                 dr.set_error(dr.code, f"Failed to insert {table}[{schema}")
         except Exception as e:
-            logger.exception(f"DynoConnect.insert({table}[{schema}])")
-            dr.set_error(500, f"{e!r}")
+            if type(e).__name__ == "ConditionalCheckFailedException":
+                dr.set_error(400, f"Already Exists")
+                dr.errors.append(f"{e!r}")
+            else:
+                logger.exception(f"DynoConnect.insert({table}[{schema}])")
+                dr.set_error(500, f"{e!r}")
         return dr
 
     def delete_item(self, data: dict, table: type[DynoTable], schema: type[DynoSchema]) -> DynoResponse:
@@ -300,25 +365,71 @@ class DynoConnect:
             dr.set_error(500, f"{e!r}")
         return dr
 
-    def all(self, table: type[DynoTable], schema: type[DynoSchema], globalindex: None | str = None,
-            limit: int = 100, startkey: None | dict = None) -> DynoResponse:
-        query = DynoQuery(table, schema, globalindex)
-        query.set_limit(limit)
-        query.StartKey(startkey)
-        dr = self.query(query)
+    def scan(self, query: DynoQuery) -> DynoResponse:
+        dr = DynoResponse()
+        try:
+            params = query.build(for_scan=True)
+            if params is None:
+                dr.set_error(500, "Query incomplete")
+                return dr
+
+            db = self.client()
+            r = db.scan(**params)
+            dr.set_response(r, query.get_link())
+            if dr.code != 200:
+                logger.error(f"DynoConnect.query({query.TableName})")
+                dr.errors.append(f"Failed to query {query.TableName}")
+
+            if "LastEvaluatedKey" in r:
+                query.set_startkey(dr.LastEvaluatedKey)
+
+            if query.limit == 1 and isinstance(dr.data, list) and len(dr.data) > 0:
+                dr.data = dr.data[0]
+
+        except Exception as e:
+            logger.exception(f"DynoConnect.query({query.TableName}) {e!r}")
+            dr.set_error(500, f"{e!r}")
         return dr
 
-    def fetch(self, pk: str | bytes | int | float, sk: str | bytes | int | float,
-              table: type[DynoTable], schema: type[DynoSchema], globalindex: None | str = None) -> None | dict:
+    def all(self, table: type[DynoTable], schema: type[DynoSchema] | None = None, globalindex: None | str = None,
+            limit: int = 100, startkey: None | dict = None) -> DynoResponse:
         query = DynoQuery(table, schema, globalindex)
-        query.set_limit(1)
-        query.Key.pk = pk
-        query.Key.op("=", sk)
+        query.limit = limit
+        query.set_startkey(startkey)
+        if schema is None:
+            dr = self.scan(query)
+        else:
+            query.apply_key(dict())
+            if query.Key.pk:
+                dr = self.query(query)
+            else:
+                dr = self.scan(query)
+        return dr
 
-        dr = self.query(query)
-        if len(dr.data) > 0:
-            dr.data = dr.data[0]
-        return dr.data
+    def fetch(self, data: dict[str, any],
+              table: type[DynoTable], schema: type[DynoSchema], globalindex: None | str = None) -> None | dict:
+        dr = DynoResponse()
+
+        query = DynoQuery(table, schema, globalindex)
+        query.limit = 1
+        query.apply_key(data)
+
+        try:
+            params = query.build()
+            if params is None:
+                raise Exception(f"Parameters are incomplete")
+
+            db = self.client()
+            r = db.query(**params)
+            dr.set_response(r, query.get_link())
+            if dr.code != 200:
+                return None
+            if isinstance(dr.data, list) and len(dr.data) > 0:
+                return dr.data[0]
+            return None
+        except Exception as e:
+            logger.exception(f"DynoConnect.fetch({query.TableName}) {e!r}")
+            raise Exception(f"Fetch error {e!r}")
 
     def query(self, query: DynoQuery) -> DynoResponse:
         dr = DynoResponse()
@@ -337,6 +448,9 @@ class DynoConnect:
 
             if "LastEvaluatedKey" in r:
                 query.set_startkey(dr.LastEvaluatedKey)
+
+            if query.limit == 1 and isinstance(dr.data, list) and len(dr.data) > 0:
+                dr.data = dr.data[0]
 
         except Exception as e:
             logger.exception(f"DynoConnect.query({query.TableName}) {e!r}")
@@ -401,7 +515,7 @@ class DynoConnect:
                 dr.set_error(500, f"{e!r}")
         return dr
 
-    def _insert_auto_increment(self, data: Dict[str, Any], table: type[DynoTable], schema: type[DynoSchema]):
+    def _insert_auto_increment(self, data: dict[str, any], table: type[DynoTable], schema: type[DynoSchema]):
         dr = DynoResponse()
         db = self.client()
         try:
@@ -466,7 +580,7 @@ class DynoConnect:
             dr.set_error(500, f"{e!r}")
         return dr
 
-    def auto_increment(self, data: Dict[str, Any], table: type[DynoTable], schema: type[DynoSchema],
+    def auto_increment(self, data: dict[str, any], table: type[DynoTable], schema: type[DynoSchema],
                        name: str, reset: bool = False) -> None | int:
         params = table.auto_increment(data, schema, name, reset)
         if params is None:

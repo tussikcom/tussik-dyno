@@ -1,6 +1,5 @@
 import inspect
 import logging
-from typing import Set, Any, Dict, Type, Optional, List
 
 from .attributes import DynoEnum, DynoAttrBase, DynoAttribAutoIncrement, DynoAttrMap, DynoAttrList
 
@@ -71,15 +70,15 @@ class DynoKey:
 class DynoKeyFormat:
     __slots__ = ["pk", "sk", "req"]
 
-    def __init__(self, pk: None | str = None, sk: None | str = None, req: None | Set[str] = None):
+    def __init__(self, pk: None | str = None, sk: None | str = None, req: None | set[str] = None):
         self.pk: str = pk
         self.sk: str = sk
-        self.req: Set[str] = req or set[str]()
+        self.req: set[str] = req or set[str]()
 
     def __repr__(self):
         return f"DynoKeyFormat: pk={self.pk}, sk={self.sk}, req={' '.join(self.req)}"
 
-    def write(self, key: DynoKey, values: None | Dict[str, Any]) -> None | Dict[str, Dict[str, Any]]:
+    def write(self, key: DynoKey, values: None | dict[str, any]) -> None | dict[str, dict[str, any]]:
         pval = self.format_pk(values)
         if pval is None:
             return None
@@ -92,18 +91,32 @@ class DynoKeyFormat:
         }
         return results
 
-    def format_pk(self, values: None | Dict[str, Any] = None) -> None | str:
+    def format_pk(self, values: None | dict[str, any] = None) -> None | str:
         if self.pk is not None:
             try:
-                return self.pk.format(**(values or dict()))
+                value = self.pk.format(**(values or dict()))
+                if "None" in value:
+                    for check in self.req:
+                        if check not in values:
+                            return None
+                        if values[check] is None:
+                            return None
+                return value
             except Exception as e:
                 pass
         return None
 
-    def format_sk(self, values: None | Dict[str, Any] = None) -> None | str:
+    def format_sk(self, values: None | dict[str, any] = None) -> None | str:
         if self.sk is not None:
             try:
-                return self.sk.format(**(values or dict()))
+                value = self.sk.format(**(values or dict()))
+                if "None" in value:
+                    for check in self.req:
+                        if check not in values:
+                            return None
+                        if values[check] is None:
+                            return None
+                return value
             except Exception as e:
                 pass
         return None
@@ -112,16 +125,16 @@ class DynoKeyFormat:
 class DynoGlobalIndexFormat:
     __slots__ = ["name", "pk", "sk", "req"]
 
-    def __init__(self, name: str, pk: None | str = None, sk: None | str = None, req: None | Set[str] = None):
+    def __init__(self, name: str, pk: None | str = None, sk: None | str = None, req: None | set[str] = None):
         self.name = name
         self.pk: str = pk
         self.sk: str = sk
-        self.req: Set[str] = req or set[str]()
+        self.req: set[str] = req or set[str]()
 
     def __repr__(self):
         return f"DynoGlobalIndexFormat.{self.name}: pk={self.pk}, sk={self.sk}, req={' '.join(self.req)}"
 
-    def write(self, key: DynoKey, values: None | Dict[str, Any]) -> None | Dict[str, Dict[str, Any]]:
+    def write(self, key: DynoKey, values: None | dict[str, any]) -> None | dict[str, dict[str, any]]:
         pval = self.format_pk(values)
         if pval is None:
             return None
@@ -134,18 +147,32 @@ class DynoGlobalIndexFormat:
         }
         return results
 
-    def format_pk(self, values: None | Dict[str, Any] = None) -> None | str:
+    def format_pk(self, values: None | dict[str, any] = None) -> None | str:
         if self.pk is not None:
             try:
-                return self.pk.format(**(values or dict()))
+                value = self.pk.format(**(values or dict()))
+                if "None" in value:
+                    for check in self.req:
+                        if check not in values:
+                            return None
+                        if values[check] is None:
+                            return None
+                return value
             except Exception as e:
                 pass
         return None
 
-    def format_sk(self, values: None | Dict[str, Any] = None) -> None | str:
+    def format_sk(self, values: None | dict[str, any] = None) -> None | str:
         if self.sk is not None:
             try:
-                return self.sk.format(**(values or dict()))
+                value = self.sk.format(**(values or dict()))
+                if "None" in value:
+                    for check in self.req:
+                        if check not in values:
+                            return None
+                        if values[check] is None:
+                            return None
+                return value
             except Exception as e:
                 pass
         return None
@@ -196,7 +223,7 @@ class DynoGlobalIndex:
 
 class DynoSchema(metaclass=DynoMeta):
     Key: DynoKeyFormat = ...
-    Indexes: List[DynoGlobalIndexFormat] = list[DynoGlobalIndexFormat]()
+    Indexes: list[DynoGlobalIndexFormat] = list[DynoGlobalIndexFormat]()
 
     @classmethod
     def _class_repr(cls):
@@ -211,7 +238,7 @@ class DynoSchema(metaclass=DynoMeta):
         return cls.__name__
 
     @classmethod
-    def get_globalindexes(cls) -> Dict[str, DynoGlobalIndexFormat]:
+    def get_globalindexes(cls) -> dict[str, DynoGlobalIndexFormat]:
         results = dict[str, DynoGlobalIndexFormat]()
         for item in cls.Indexes:
             if isinstance(item, DynoGlobalIndexFormat):
@@ -226,7 +253,7 @@ class DynoSchema(metaclass=DynoMeta):
         return None
 
     @classmethod
-    def get_attributes(cls, nested: bool = False) -> Dict[str, DynoAttrBase]:
+    def get_attributes(cls, nested: bool = False) -> dict[str, DynoAttrBase]:
         results = dict[str, DynoAttrBase]()
         for name, cls_attr in cls.__dict__.items():
             if isinstance(cls_attr, DynoAttrBase):
@@ -249,8 +276,9 @@ class DynoSchema(metaclass=DynoMeta):
     @classmethod
     def get_autoincrement(cls, name: str) -> None | DynoAttribAutoIncrement:
         for autoinc_name, cls_attr in cls.__dict__.items():
-            if isinstance(cls_attr, DynoAttribAutoIncrement) and autoinc_name == name:
-                return cls_attr
+            if isinstance(cls_attr, DynoAttribAutoIncrement):
+                if autoinc_name == name:
+                    return cls_attr
         return None
 
 
@@ -270,7 +298,7 @@ class DynoTable(metaclass=DynoMeta):
     TableName: str = ...
     SchemaFieldName: None | str = "schema"
     Key: DynoKey = ...
-    Indexes: List[DynoGlobalIndex] = list[DynoGlobalIndex]()
+    Indexes: list[DynoGlobalIndex] = list[DynoGlobalIndex]()
     DeletionProtection = True
     TableClassStandard = True
     PayPerRequest = True
@@ -338,7 +366,7 @@ class DynoTable(metaclass=DynoMeta):
 
     @classmethod
     def auto_increment(cls,
-                       data: dict[str, Any],
+                       data: dict[str, any],
                        schema: type[DynoSchema],
                        name: str,
                        reset: None | bool = None) -> None | dict:
@@ -395,7 +423,7 @@ class DynoTable(metaclass=DynoMeta):
 
     @classmethod
     def write_table_create(cls) -> dict:
-        params = dict[str, Any]()
+        params = dict[str, any]()
 
         params["TableName"] = cls.TableName
         params["TableClass"] = "STANDARD" if cls.TableClassStandard else "STANDARD_INFREQUENT_ACCESS"
@@ -405,7 +433,7 @@ class DynoTable(metaclass=DynoMeta):
         #
         # Attributes
         #
-        results = list[dict[str, Any]]()
+        results = list[dict[str, any]]()
         results.append({"AttributeName": cls.Key.pk, "AttributeType": cls.Key.pk_type.value})
         results.append({"AttributeName": cls.Key.sk, "AttributeType": cls.Key.sk_type.value})
         for name, gsi in cls.get_globalindexes().items():
@@ -450,7 +478,7 @@ class DynoTable(metaclass=DynoMeta):
         return params
 
     @classmethod
-    def get_globalindexes(cls) -> Dict[str, DynoGlobalIndex]:
+    def get_globalindexes(cls) -> dict[str, DynoGlobalIndex]:
         indexes = dict[str, DynoGlobalIndex]()
         for item in cls.Indexes:
             if isinstance(item, DynoGlobalIndex):
@@ -465,22 +493,22 @@ class DynoTable(metaclass=DynoMeta):
         return None
 
     @classmethod
-    def get_schemas(cls) -> Dict[str, Type[DynoSchema]]:
-        results = dict[str, Type[DynoSchema]]()
+    def get_schemas(cls) -> dict[str, type[DynoSchema]]:
+        results = dict[str, type[DynoSchema]]()
         for name, cls_attr in cls.__dict__.items():
             if inspect.isclass(cls_attr) and issubclass(cls_attr, DynoSchema):
                 results[name] = cls_attr
         return results
 
     @classmethod
-    def get_schema(cls, name: str) -> Optional[Type[DynoSchema]]:
+    def get_schema(cls, name: str) -> type[DynoSchema] | None:
         for n, cls_attr in cls.__dict__.items():
             if inspect.isclass(cls_attr) and issubclass(cls_attr, DynoSchema) and n == name:
                 return cls_attr
         return None
 
     @classmethod
-    def allow_list(cls, schema: type[DynoSchema], globalindex: None | str = None) -> Dict[str, DynoAllow]:
+    def allow_list(cls, schema: type[DynoSchema], globalindex: None | str = None) -> dict[str, DynoAllow]:
         result = dict[str, DynoAllow]()
 
         # auto include the key
@@ -509,14 +537,20 @@ class DynoTable(metaclass=DynoMeta):
 
     @classmethod
     def write_value(cls,
-                    data: dict[str, Any],
+                    data: dict[str, any],
                     schema: type[DynoSchema],
                     globalindex: None | str = None,
                     include_readonly: None | bool = None
-                    ) -> dict[str, Any]:
+                    ) -> dict[str, any]:
         allow = cls.allow_list(schema, globalindex)
-        result = dict[str, Any]()
+        result = dict[str, any]()
         include_readonly = include_readonly if isinstance(include_readonly, bool) else False
+
+        #
+        # tagged record with schema field value
+        #
+        if isinstance(cls.SchemaFieldName, str):
+            result[cls.SchemaFieldName] = schema.get_schema_name()
 
         #
         # write attributes
@@ -553,8 +587,15 @@ class DynoTable(metaclass=DynoMeta):
             if isinstance(globalindex, str) and name != globalindex:
                 continue
             fmt = schema.get_globalindex(name)
+            pk = None
+            sk = None
+
             if fmt is not None:
-                result[gsi.pk] = fmt.format_pk(result)
-                result[gsi.sk] = fmt.format_sk(result)
+                pk = fmt.format_pk(result)
+                sk = fmt.format_sk(result)
+
+            if pk is not None and sk is not None:
+                result[gsi.pk] = pk
+                result[gsi.sk] = sk
 
         return result
