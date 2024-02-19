@@ -3,7 +3,7 @@ from enum import Enum
 
 from tussik.dyno import *
 from tussik.dyno.attributes import DynoAttribAutoIncrement
-from tussik.dyno.query import DynoQuery
+from tussik.dyno.query import DynoQuery, DynoQuerySelectEnum
 from tussik.dyno.table import DynoGlobalIndexFormat
 
 
@@ -32,7 +32,7 @@ class SampleStatusEnum(Enum):
 
 class SampleTable(DynoTable):
     TableName: str = "sample"
-    SchemaFieldName: str = "type"
+    SchemaFieldName: str = "myrectype"
 
     DeletionProtection = True
     TableClassStandard = True
@@ -53,7 +53,7 @@ class SampleTable(DynoTable):
 
     class Account(DynoSchema):
         Key = DynoKeyFormat(pk="account#", sk="accountid#{accountid}", req={"accountid"})
-        Indexes = [DynoGlobalIndexFormat("gsi2", pk="account#", sk="alias#{alias}", req={"alias"})]
+        Indexes = [DynoGlobalIndexFormat("gsi1", pk="account#", sk="alias#{alias}", req={"alias"})]
         accountid = DynoAttrUuid()
         next_userid = DynoAttribAutoIncrement()
         active = DynoAttrBool(defval=True)
@@ -70,6 +70,7 @@ class SampleTable(DynoTable):
         email = DynoAttrString()
         age = DynoAttrInt(defval=20)
         active = DynoAttrBool(defval=True)
+        tags = DynoAttrStringList()
         flag = DynoAttrFlag({"Left", "Right", "Center", "Top", "Bottom"})
         created = DynoAttrDateTime(readonly=True)
         modified = DynoAttrDateTime(current=True)
@@ -83,31 +84,6 @@ DynoConnect.set_host()
 
 
 class TestDyno:
-
-    def test_metadata(self):
-        sn = SampleTable.Account.get_schema_name()
-        account = SampleTable.get_schema("Account")
-        schemaname = account.get_schema_name()
-        attributes = account.get_attributes(True)
-        account.get_autoincrement("foo")
-        x = account.get_globalindex("gsi1")
-        y = SampleTable.get_link(SampleTable.User, "gsi1")
-        assert True
-
-    def test_init_values(self):
-        data = {
-            "address": {
-                "addr1": "123 Main Street",
-                "city": "somewhere"
-            },
-            "color": "red",
-            "joe": "skip",
-            "modified": 1,
-        }
-        data = dict()
-        result = SampleTable.write_value(data, SampleTable.Account)
-        assert True
-
     def test_create_table(self) -> None:
         db = DynoConnect()
         dr = db.table_create(SampleTable)
@@ -120,10 +96,70 @@ class TestDyno:
         dr = db.table_delete(SampleTable)
         assert dr.ok
 
+    def test_metadata(self):
+        assert SampleTable.isvalid()
+
+        sn = SampleTable.Account.get_schema_name()
+        assert sn
+
+        account = SampleTable.get_schema("Account")
+        assert account
+
+        schemaname = account.get_schema_name()
+        assert schemaname == sn
+
+        attributes = account.get_attributes(True)
+        assert len(attributes) > 0
+
+        foo = account.get_autoincrement("foo")
+        assert foo is None
+        next_userid = account.get_autoincrement("next_userid")
+        assert next_userid
+
+        x = account.get_globalindex("gsi1")
+        assert x
+
+        y = SampleTable.get_link(SampleTable.User, "gsi1")
+        assert y
+
+    def test_initalize_values(self):
+        data = {
+            "address": {
+                "addr1": "123 Main Street",
+                "city": "somewhere"
+            },
+            "color": "red",
+            "joe": "skip",
+            "modified": 1,
+        }
+        data = dict()
+        result = SampleTable.write_value(data, SampleTable.Account)
+        assert result
+
     def test_autoinc_value(self) -> None:
         db = DynoConnect()
         value = db.auto_increment(dict(), SampleTable, SampleTable.AutoIncrement, "next_accountid")
         assert isinstance(value, int)
+
+    def test_conditional_gsi(self) -> None:
+        data_account = {
+            "address": {
+                "addr1": "123 Main Street",
+                "city": "somewhere"
+            },
+            "color": "red",
+            "joe": "skip",
+            "modified": 1,
+        }
+
+        x1 = SampleTable.write_value(data_account, SampleTable.Account, include_readonly=True)
+        assert x1
+        assert "gsi1_sk" not in x1
+
+        data_account['alias'] = "fresh_value"
+        x2 = SampleTable.write_value(data_account, SampleTable.Account, include_readonly=True)
+        assert x2
+        assert "gsi1_sk" in x2
 
     def test_insert_account(self) -> None:
         db = DynoConnect()
@@ -137,7 +173,7 @@ class TestDyno:
             "modified": 1,
         }
 
-        dr = db.insert(data_account, SampleTable, SampleTable.Account)
+        dr = db.put_item(data_account, SampleTable, SampleTable.Account)
         assert dr.ok
         accountid = dr.data.get('accountid')
         dr = db.get_item(dr.data, SampleTable, SampleTable.Account)
@@ -150,27 +186,74 @@ class TestDyno:
             "userid": None,
             "email": "user@domain.com",
             "flag": "Left",
+            "tags": ["one", "two"],
             "joe": "skip",
             "modified": 1,
         }
-        dr = db.insert(data_user, SampleTable, SampleTable.User)
-        assert dr.ok
-        userid = dr.data.get('userid')
-        dr = db.get_item(dr.data, SampleTable, SampleTable.User)
-        assert dr.ok
+        dr1 = db.put_item(data_user, SampleTable, SampleTable.User)
+        assert dr1.ok
+        userid = dr1.data.get('userid')
+        dr2 = db.get_item(dr1.data, SampleTable, SampleTable.User)
+
+        query = DynoQuery(SampleTable, SampleTable.User, limit=1)
+        query.Key.pk = dr1.data.get("pk")
+        query.Key.op("=", dr1.data.get("sk"))
+        params1 = query.build()
+        dr3 = db.query(query)
+
+        query = DynoQuery(SampleTable, SampleTable.User, limit=1)
+        query.apply_key(dr1.data)
+        params2 = query.build()
+        dr4 = db.query(query)
+
+        query = DynoQuery(SampleTable, SampleTable.User)
+        query.set_select(DynoQuerySelectEnum.count)
+        dr5 = db.query(query)
+
+        assert dr2.ok
+
+    def test_scan(self):
+        db = DynoConnect()
+
+        query = DynoQuery(SampleTable)
+        dr1 = db.scan(query)
+        assert dr1.ok
+
+        query = DynoQuery(SampleTable, SampleTable.Account)
+        dr2 = db.scan(query)
+        assert dr2.ok
+
+        query = DynoQuery(SampleTable, SampleTable.Account, "gsi1")
+        dr3 = db.scan(query)
+        assert dr3.ok
+
+    def test_query_all(self):
+        db = DynoConnect()
+
+        query = DynoQuery(SampleTable, SampleTable.Account)
+        dr0 = db.scan(query)
+
+        dr1 = db.all(SampleTable)
+        assert dr1.ok
+
+        dr2 = db.all(SampleTable, SampleTable.Account)
+        assert dr2.ok
+
+        dr3 = db.all(SampleTable, SampleTable.User)
+        assert dr3.ok
 
     def test_query_one(self):
         query = DynoQuery(SampleTable, SampleTable.User)
         userid = '286e456d410c4ffdb6d0d52273a68eab'
         query.Key.pk = "user#"
-        query.Key.op("=", f"user#{userid}")
+        # query.Key.op("=", f"user#{userid}")
         params = query.build()
         db = DynoConnect()
         dr = db.query(query)
         assert True
 
     def test_query_pk(self):
-        query = DynoQuery(SampleTable, SampleTable.Account, "Gsi1")
+        query = DynoQuery(SampleTable, SampleTable.Account, "gsi1")
 
         query.Key.pk = "user#"
         query.Key.op(DynoOpEnum.eq, "user#1234")
@@ -182,7 +265,7 @@ class TestDyno:
         # query.FilterExpression().op("accountid", "=", "AAABBBCCC")
         # query.FilterGlobalIndex("gsi1").Contains("test_gsi1")
 
-        query.set_limit(5)
+        query.limit = 5
         params = query.build()
 
         db = DynoConnect()
@@ -191,30 +274,6 @@ class TestDyno:
         if dr.LastEvaluatedKey:
             dr = db.query(query)
 
-        assert True
-
-    def test_update(self):
-        db = DynoConnect()
-        # dr = db.all(SampleTable, "Account", limit=5)
-        # row = dr.data[0]
-        # item = db.fetch(row['pk'], row['sk'], SampleTable, "Account")
-        item = {"accountid": "xsdd", "created": 11111}
-
-        item["address"] = {
-            "addr1": "456 Main Street",
-            "city": "smallville",
-            "zipcode": "90210",
-            "country": "US"
-        }
-        item['junk_field'] = 123
-        item['age'] = 45
-
-        update = DynoUpdate(SampleTable, SampleTable.Account)
-        update.apply_set(item)
-
-        params = update.build(item)
-
-        db.update(update)
         assert True
 
     def test_reader(self):
@@ -244,3 +303,88 @@ class TestDyno:
         valueE = valueA.dataset
 
         assert True
+
+    def test_update(self):
+        db = DynoConnect()
+
+        dr = db.all(SampleTable, SampleTable.Account)
+        assert dr.ok
+        accounts = dr.data
+        assert len(accounts) > 0
+
+        # dr = db.all(SampleTable, "Account", limit=5)
+        # row = dr.data[0]
+        # item = db.fetch(row['pk'], row['sk'], SampleTable, "Account")
+        item = accounts[0]
+
+        item["address"] = {
+            "addr1": "456 Main Street",
+            "city": "smallville",
+            "zipcode": "90210",
+            "country": "US"
+        }
+        item['junk_field'] = 123
+        item['age'] = 45
+        item['title'] = "Updated Title"
+
+        update = DynoUpdate(SampleTable, SampleTable.Account)
+        update.apply_key(item)
+        update.apply_set(item)
+        params = update.build()
+
+        dr = db.update(update)
+        assert dr.ok
+
+    def test_update_put(self):
+        db = DynoConnect()
+
+        dr0 = db.all(SampleTable, SampleTable.User)
+        assert dr0.ok
+        users = dr0.data
+        assert len(users) > 0
+        item = users[-1]
+        current_age = item['age']
+        current_tags = item['tags']
+
+        item["age"] = 65
+        item['tags'] = ["thing1", "thing2"]
+
+        dr1 = db.put_item(item, SampleTable, SampleTable.User, enforce_gsi=False, ignore_gsi=True)
+
+        dr2 = db.fetch(item, SampleTable, SampleTable.User)
+        new_age = dr2['age']
+        new_tags = dr2['tags']
+
+        assert new_age == 65
+        assert new_tags == ["thing1", "thing2"]
+
+    def test_update_add(self):
+        db = DynoConnect()
+
+        dr0 = db.all(SampleTable, SampleTable.User)
+        assert dr0.ok
+        users = dr0.data
+        assert len(users) > 0
+        item = users[0]
+        current_age = item['age']
+        current_tags = item['tags']
+
+        update = DynoUpdate(SampleTable, SampleTable.User)
+        update.apply_key(item)
+        # update.apply_add({"age": 5})
+        update.apply_add({"tags": "three"})
+        update.apply_add({"tags": "four"})
+        update.apply_add({"tags": ["five", "six"]})
+        # update.apply_delete({"tags": "one"})
+
+        msg = update.build()
+        dr1 = db.update(update)
+
+        dr2 = db.fetch(item, SampleTable, SampleTable.User)
+        new_age = dr2['age']
+        new_tags = dr2['tags']
+
+        assert current_age + 5 == new_age
+        assert len(new_tags) == 5
+
+

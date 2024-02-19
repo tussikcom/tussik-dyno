@@ -1,5 +1,4 @@
 import logging
-from typing import Any, List, Dict
 
 from tussik.dyno import DynoEnum
 
@@ -9,13 +8,13 @@ logger = logging.getLogger()
 class DynoReader:
     __slots__ = ['_dataset', '_cache']
 
-    def __init__(self, data: Any):
+    def __init__(self, data: any):
         self._dataset: None | list | dict = None
         if isinstance(data, list):
             self._dataset = self._read_list(data)
         elif isinstance(data, dict):
             self._dataset = self._read_dict(data)
-        self._cache = dict[str, Any]()
+        self._cache = dict[str, any]()
 
     def __repr__(self):
         return f'DynoReader with {len(self._dataset)} elements'
@@ -24,14 +23,14 @@ class DynoReader:
     def dataset(self) -> None | list | dict:
         return self._dataset
 
-    def _cache_get(self, key: str) -> Any:
+    def _cache_get(self, key: str) -> any:
         return self._cache.get(key)
 
-    def _cache_set(self, key: str, value: Any) -> None:
+    def _cache_set(self, key: str, value: any) -> None:
         if value is not None:
             self._cache[key] = value
 
-    def _read_list(self, data: list) -> List[dict]:
+    def _read_list(self, data: list) -> list[dict]:
         dataset = list[dict]()
         for item in data:
             value = self._read_dict(item)
@@ -39,7 +38,7 @@ class DynoReader:
         return dataset
 
     def _read_dict(self, data: dict) -> dict:
-        dataset = dict[str, Any]()
+        dataset = dict[str, any]()
 
         for name, value in data.items():
             if isinstance(value, dict) and len(value) == 1:
@@ -58,13 +57,15 @@ class DynoReader:
             if isinstance(value, dict):
                 dataset[name] = self._read_dict(value)
             elif isinstance(value, list):
-                dataset[name] = self._read_list(value)
+                dataset[name] = list()
+                for item in value:
+                    dataset[name].append(item)
             else:
                 dataset[name] = value
 
         return dataset
 
-    def allow_list(self, table: type["DynoTable"], schema: type["DynoSchema"] | None = None) -> Dict[str, DynoEnum]:
+    def allow_list(self, table: type["DynoTable"], schema: type["DynoSchema"] | None = None) -> dict[str, DynoEnum]:
         if issubclass(table, type("DynoTable")):
             raise ValueError("table must be DynoTable Type")
         if schema is not None and issubclass(schema, type("DynoSchema")):
@@ -102,18 +103,31 @@ class DynoReader:
         if value is not None:
             return value
 
-        allowlist = self.allow_list(table, schema)
-        if isinstance(self._dataset, list):
-            value = self._decode_list(allowlist, self._dataset)
-        elif isinstance(self._dataset, dict):
-            value = self._decode_dict(allowlist, self._dataset)
-        else:
-            value = None
+        try:
+
+            allowlist = self.allow_list(table, schema)
+            if isinstance(self._dataset, list):
+                value = self._decode_list(allowlist, self._dataset)
+            elif isinstance(self._dataset, dict):
+                value = self._decode_dict(allowlist, self._dataset)
+            else:
+                value = None
+
+            if table.SchemaFieldName and schema:
+                if isinstance(value, dict):
+                    value[table.SchemaFieldName] = schema.get_schema_name()
+                elif isinstance(value, list):
+                    for item in value:
+                        item[table.SchemaFieldName] = schema.get_schema_name()
+
+        except Exception as e:
+            logger.exception(f"DynoReader.decode")
+            raise e
 
         self._cache_set(key, value)
         return value
 
-    def _decode_list(self, allowlist: Dict[str, DynoEnum], data: Any, prefix: None | str = None) -> list:
+    def _decode_list(self, allowlist: dict[str, DynoEnum], data: any, prefix: None | str = None) -> list:
         dataset = list()
         for item in data:
             if isinstance(item, list):
@@ -126,22 +140,37 @@ class DynoReader:
                 dataset.append(item)
         return dataset
 
-    def _decode_dict(self, allowlist: Dict[str, DynoEnum], data: Any, prefix: None | str = None) -> dict:
+    def _decode_dict(self, allowlist: dict[str, DynoEnum], data: any, prefix: None | str = None) -> dict:
         dataset = dict()
 
-        for name, item in data.items():
-            new_prefix = f"{prefix}.{name}" if isinstance(prefix, str) else name
-            if new_prefix not in allowlist:
-                continue
+        try:
+            for name, item in data.items():
+                new_prefix = f"{prefix}.{name}" if isinstance(prefix, str) else name
+                if new_prefix not in allowlist:
+                    continue
 
-            if isinstance(item, list):
-                value = self._decode_list(allowlist, item, new_prefix)
-                dataset[name] = value
-            elif isinstance(item, dict):
-                value = self._decode_dict(allowlist, item, new_prefix)
-                dataset[name] = value
+                dt = allowlist.get(new_prefix)
+
+                if isinstance(item, list):
+                    value = self._decode_list(allowlist, item, new_prefix)
+                    dataset[name] = value
+                elif isinstance(item, dict):
+                    value = self._decode_dict(allowlist, item, new_prefix)
+                    dataset[name] = value
+                else:
+                    if dt == DynoEnum.Number:
+                        new_value = float(item)
+                        if new_value.is_integer():
+                            new_value = int(new_value)
+                        dataset[name] = new_value
+                    else:
+                        dataset[name] = item
+        except Exception as e:
+            if isinstance(prefix, str):
+                logger.exception(f"DynoReader._decode_dict({prefix})")
             else:
-                dataset[name] = item
+                logger.exception(f"DynoReader._decode_dict")
+            raise e
         return dataset
 
     def encode(self, table: type["DynoTable"], schema: type["DynoSchema"] | None = None) -> None | dict | list:
@@ -167,10 +196,17 @@ class DynoReader:
         else:
             value = None
 
+        if table.SchemaFieldName and schema:
+            if isinstance(value, dict):
+                value[table.SchemaFieldName] = {"S": schema.get_schema_name()}
+            elif isinstance(value, list):
+                for item in value:
+                    item[table.SchemaFieldName] = {"S": schema.get_schema_name()}
+
         self._cache_set(key, value)
         return value
 
-    def _encode_list(self, allowlist: Dict[str, DynoEnum], data: Any, prefix: None | str = None) -> list:
+    def _encode_list(self, allowlist: dict[str, DynoEnum], data: any, prefix: None | str = None) -> list:
         dataset = list()
         for item in data:
             if isinstance(item, list):
@@ -183,7 +219,7 @@ class DynoReader:
                 dataset.append(item)
         return dataset
 
-    def _encode_dict(self, allowlist: Dict[str, DynoEnum], data: Any, prefix: None | str = None) -> dict:
+    def _encode_dict(self, allowlist: dict[str, DynoEnum], data: any, prefix: None | str = None) -> dict:
         dataset = dict()
 
         for name, item in data.items():

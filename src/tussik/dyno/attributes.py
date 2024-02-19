@@ -2,7 +2,7 @@ import datetime
 import logging
 import uuid
 from enum import Enum
-from typing import Set, Any, Dict, Type, Self
+from typing import Self
 
 logger = logging.getLogger()
 
@@ -20,7 +20,7 @@ class DynoEnum(str, Enum):
     List = "L"
 
     @classmethod
-    def get_datatype(cls, value: Any) -> None | Self:
+    def get_datatype(cls, value: any) -> None | Self:
         if value is None:
             return cls.Null
         if isinstance(value, str):
@@ -63,11 +63,19 @@ class DynoAttrBase:
     def __init__(self, always: None | bool = None, readonly: None | bool = None):
         self.always = always if isinstance(always, bool) else True
         self.readonly = readonly if isinstance(readonly, bool) else False
+        self.replace = False
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__} code:{self.code}"
+        msg = list[str]()
+        if self.always:
+            msg.append("always")
+        if self.readonly:
+            msg.append("readonly")
+        if self.replace:
+            msg.append("replace")
+        return f"{self.__class__.__name__} code={self.code}, {' '.join(msg)}"
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             return None
         if isinstance(value, bool) and self.code == DynoEnum.Boolean:
@@ -95,7 +103,7 @@ class DynoAttrBase:
         myname = self.__class__.__name__
         raise ValueError(f"{myname}.read: Unsupported value-type {type(value)}")
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             return {self.code: True}
         if isinstance(value, bool) and self.code == DynoEnum.Boolean:
@@ -123,7 +131,7 @@ class DynoAttrBase:
         myname = self.__class__.__name__
         raise ValueError(f"{myname}.read: Unsupported value-type {type(value)}")
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return None
 
@@ -165,12 +173,12 @@ class DynoAttrUuid(DynoAttrBase):
     def __init__(self, always: None | bool = None, readonly: None | bool = None):
         super().__init__(always, readonly)
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if isinstance(value, str):
             return value
         return str(uuid.uuid4()).replace("-", "")
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if isinstance(value, str):
             return {self.code: value}
         return {self.code: str(uuid.uuid4()).replace("-", "")}
@@ -185,8 +193,9 @@ class DynoAttrDateTime(DynoAttrBase):
         super().__init__(always, readonly)
         self.asinteger = asinteger if isinstance(asinteger, bool) else True
         self.current = current if isinstance(current, bool) else False
+        self.replace = current  # keep current requires always replacing the value
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if self.current:
             return int(datetime.datetime.utcnow().timestamp())
         if isinstance(value, datetime.datetime):
@@ -195,7 +204,7 @@ class DynoAttrDateTime(DynoAttrBase):
             return int(value)
         return int(datetime.datetime.utcnow().timestamp())
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if self.current:
             return {self.code: str(int(datetime.datetime.utcnow().timestamp()))}
         if isinstance(value, datetime.datetime):
@@ -204,7 +213,7 @@ class DynoAttrDateTime(DynoAttrBase):
             return {self.code: str(int(value))}
         return {self.code: str(int(datetime.datetime.utcnow().timestamp()))}
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return None
         if datatype != self.code:
@@ -219,13 +228,13 @@ class DynoAttrIntEnum(DynoAttrBase):
     __slots__ = ["enumclass", "defval"]
     code: str = DynoEnum.Number.value
 
-    def __init__(self, enumclass: Type[Enum], defval: None | Enum = None,
+    def __init__(self, enumclass: type[Enum], defval: None | Enum = None,
                  always: None | bool = None, readonly: None | bool = None):
         super().__init__(always, readonly)
         self.enumclass = enumclass
         self.defval = defval if isinstance(defval, enumclass) else None
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             if self.defval is not None:
                 return {self.code: str(self.defval.value)}
@@ -237,7 +246,7 @@ class DynoAttrIntEnum(DynoAttrBase):
                     return item
         return None
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             if self.defval is not None:
                 return int(self.defval.value)
@@ -252,7 +261,7 @@ class DynoAttrIntEnum(DynoAttrBase):
 
         raise ValueError(f"DynoAttrIntEnum.write: Value {value} is not a valid value")
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             if self.defval is not None:
                 return {self.code: str(self.defval.value)}
@@ -272,13 +281,13 @@ class DynoAttrStrEnum(DynoAttrBase):
     __slots__ = ["enumclass", "defval"]
     code: str = DynoEnum.String.value
 
-    def __init__(self, enumclass: Type[Enum], defval: None | Enum = None,
+    def __init__(self, enumclass: type[Enum], defval: None | Enum = None,
                  always: None | bool = None, readonly: None | bool = None):
         super().__init__(always, readonly)
         self.enumclass = enumclass
         self.defval = defval if isinstance(defval, enumclass) else None
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return None
 
@@ -288,7 +297,7 @@ class DynoAttrStrEnum(DynoAttrBase):
                     return item
         return None
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             if self.defval is not None:
                 return str(self.defval.value)
@@ -303,7 +312,7 @@ class DynoAttrStrEnum(DynoAttrBase):
 
         raise ValueError(f"DynoAttrStrEnum.write: Value {value} is not a valid value")
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             if self.defval is not None:
                 return {self.code: str(self.defval.value)}
@@ -323,11 +332,11 @@ class DynoAttrFlag(DynoAttrBase):
     __slots__ = ["options"]
     code: str = DynoEnum.String.value
 
-    def __init__(self, options: Set[str], always: None | bool = None, readonly: None | bool = None):
+    def __init__(self, options: set[str], always: None | bool = None, readonly: None | bool = None):
         super().__init__(always, readonly)
         self.options = options
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return None
         if datatype != DynoEnum.String:
@@ -337,7 +346,7 @@ class DynoAttrFlag(DynoAttrBase):
         # let any obsolete value slip by
         return value
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             return None
         if not isinstance(value, str):
@@ -346,7 +355,7 @@ class DynoAttrFlag(DynoAttrBase):
             raise ValueError(f"DynoAttrFlag.write: Value {value} is not a valid flag value")
         return value
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             return {DynoEnum.Null.value: True}
         if not isinstance(value, str):
@@ -373,7 +382,7 @@ class DynoAttrString(DynoAttrBase):
         else:
             self.max_length = max_length if isinstance(max_length, int) else None
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             return None
 
@@ -388,7 +397,7 @@ class DynoAttrString(DynoAttrBase):
 
         return value
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             return {DynoEnum.Null.value: True}
 
@@ -407,7 +416,7 @@ class DynoAttrString(DynoAttrBase):
 class DynoAttrStringList(DynoAttrBase):
     code: str = DynoEnum.StringList.value
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return list[str]()
 
@@ -420,7 +429,7 @@ class DynoAttrStringList(DynoAttrBase):
                 results.append(str(item))
         return results
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             return None
         if not isinstance(value, list):
@@ -430,7 +439,7 @@ class DynoAttrStringList(DynoAttrBase):
             results.append(str(item))
         return results
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
@@ -444,7 +453,7 @@ class DynoAttrStringList(DynoAttrBase):
 class DynoAttrIntList(DynoAttrBase):
     code: str = DynoEnum.NumberList.value
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return list[int]()
 
@@ -457,7 +466,7 @@ class DynoAttrIntList(DynoAttrBase):
                 results.append(int(item))
         return results
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             return None
         if not isinstance(value, list):
@@ -467,7 +476,7 @@ class DynoAttrIntList(DynoAttrBase):
             results.append(int(item))
         return results
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
@@ -481,7 +490,7 @@ class DynoAttrIntList(DynoAttrBase):
 class DynoAttrFloatList(DynoAttrBase):
     code: str = DynoEnum.NumberList.value
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return list[float]()
 
@@ -494,7 +503,7 @@ class DynoAttrFloatList(DynoAttrBase):
                 results.append(float(item))
         return results
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             return None
         if not isinstance(value, list):
@@ -504,7 +513,7 @@ class DynoAttrFloatList(DynoAttrBase):
             results.append(float(item))
         return results
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
@@ -518,7 +527,7 @@ class DynoAttrFloatList(DynoAttrBase):
 class DynoAttrByteList(DynoAttrBase):
     code: str = DynoEnum.ByteList.value
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return list[float]()
 
@@ -532,7 +541,7 @@ class DynoAttrByteList(DynoAttrBase):
                     results.append(item)
         return results
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             return None
         if not isinstance(value, list):
@@ -543,7 +552,7 @@ class DynoAttrByteList(DynoAttrBase):
                 results.append(item)
         return results
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
@@ -570,14 +579,14 @@ class DynoAttrInt(DynoAttrBase):
         self.lt = lt
         self.le = le
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return None
         if datatype != DynoEnum.Number:
             return None  # just accept it silently
         return int(value)
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             if self.defval is not None:
                 return int(self.defval)
@@ -598,7 +607,7 @@ class DynoAttrInt(DynoAttrBase):
 
         return int(value)
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             if self.defval is not None:
                 return {self.code: str(self.defval)}
@@ -635,14 +644,14 @@ class DynoAttrFloat(DynoAttrBase):
         self.lt = lt
         self.le = le
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return None
         if datatype != DynoEnum.Number:
             return None  # just accept it silently
         return float(value)
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             if self.defval is not None:
                 return float(self.defval)
@@ -663,7 +672,7 @@ class DynoAttrFloat(DynoAttrBase):
 
         return float(value)
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             if self.defval is not None:
                 return {self.code: str(self.defval)}
@@ -694,7 +703,7 @@ class DynoAttrBool(DynoAttrBase):
         super().__init__(always, readonly)
         self.defval = defval
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             if self.defval is not None:
                 return self.defval
@@ -711,7 +720,7 @@ class DynoAttrBytes(DynoAttrBase):
         super().__init__(always, readonly)
         self.defval = defval
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             if self.defval is not None:
                 return self.defval
@@ -722,7 +731,7 @@ class DynoAttrBytes(DynoAttrBase):
 class DynoAttrMap(DynoAttrBase):
     code: str = DynoEnum.Map.value
 
-    def get_attributes(self) -> Dict[str, DynoAttrBase]:
+    def get_attributes(self) -> dict[str, DynoAttrBase]:
         results = dict[str, DynoAttrBase]()
 
         myclass = self.__class__
@@ -731,7 +740,7 @@ class DynoAttrMap(DynoAttrBase):
                 results[name] = cls_attr
         return results
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return list()
         if datatype != self.code:
@@ -745,7 +754,7 @@ class DynoAttrMap(DynoAttrBase):
         for k1, v1 in value.items():
             if not isinstance(v1, dict):
                 continue
-            v1_ret = dict[str, Any]()
+            v1_ret = dict[str, any]()
             for k2, v2 in v1.items():
                 if not isinstance(v2, dict):
                     continue
@@ -765,14 +774,14 @@ class DynoAttrMap(DynoAttrBase):
 
         return results
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             return None
         if not isinstance(value, dict):
             raise ValueError(f"DynoAttrMap.write: Unexpected value-type {type(value)}")
 
         members = self.get_attributes()
-        results = dict[str, Any]()
+        results = dict[str, any]()
         for k1, v1 in value.items():
             member = members.get(k1)
             if member is not None:
@@ -782,14 +791,14 @@ class DynoAttrMap(DynoAttrBase):
                     logger.exception(f"DynoAttrMap.write: {e!r}")
         return results
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             return {DynoEnum.Null.value: True}
         if not isinstance(value, dict):
             raise ValueError(f"DynoAttrMap.write: Unexpected value-type {type(value)}")
 
         members = self.get_attributes()
-        results = dict[str, Any]()
+        results = dict[str, any]()
         for k1, v1 in value.items():
             member = members.get(k1)
             if member is not None:
@@ -803,7 +812,7 @@ class DynoAttrMap(DynoAttrBase):
 class DynoAttrList(DynoAttrBase):
     code: str = DynoEnum.List.value
 
-    def get_attributes(self) -> Dict[str, DynoAttrBase]:
+    def get_attributes(self) -> dict[str, DynoAttrBase]:
         results = dict[str, DynoAttrBase]()
 
         myclass = self.__class__
@@ -812,7 +821,7 @@ class DynoAttrList(DynoAttrBase):
                 results[name] = cls_attr
         return results
 
-    def read(self, datatype: str, value: Any) -> Any:
+    def read(self, datatype: str, value: any) -> any:
         if datatype == DynoEnum.Null:
             return list()
         if datatype != self.code:
@@ -826,7 +835,7 @@ class DynoAttrList(DynoAttrBase):
         for v1 in value:
             if not isinstance(v1, dict):
                 continue
-            v1_ret = dict[str, Any]()
+            v1_ret = dict[str, any]()
             for k2, v2 in v1.items():
                 if not isinstance(v2, dict):
                     continue
@@ -844,18 +853,18 @@ class DynoAttrList(DynoAttrBase):
             results.append(v1_ret)
         return results
 
-    def write_value(self, value: Any) -> Any:
+    def write_value(self, value: any) -> any:
         if value is None:
             return None
         if not isinstance(value, list):
             raise ValueError(f"DynoAttrList.write: Unexpected value-type {type(value)}")
 
         members = self.get_attributes()
-        results = list[dict[str, Any]]()
+        results = list[dict[str, any]]()
         for v1 in value:
             if not isinstance(v1, dict):
                 continue
-            v1_ret = dict[str, Any]()
+            v1_ret = dict[str, any]()
             for k2, v2 in v1.items():
                 member = members.get(k2)
                 if member is None:
@@ -870,18 +879,18 @@ class DynoAttrList(DynoAttrBase):
 
         return results
 
-    def write_encode(self, value: Any) -> Dict[str, Any]:
+    def write_encode(self, value: any) -> dict[str, any]:
         if value is None:
             return {DynoEnum.Null.value: True}
         if not isinstance(value, list):
             raise ValueError(f"DynoAttrList.write: Unexpected value-type {type(value)}")
 
         members = self.get_attributes()
-        results = list[dict[str, Any]]()
+        results = list[dict[str, any]]()
         for v1 in value:
             if not isinstance(v1, dict):
                 continue
-            v1_ret = dict[str, Any]()
+            v1_ret = dict[str, any]()
             for k2, v2 in v1.items():
                 member = members.get(k2)
                 if member is None:
